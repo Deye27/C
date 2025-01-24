@@ -38,7 +38,8 @@ In alternativa, è possibile compilare il codice sorgente manualmente.
     *   **Trascinare con il tasto sinistro del mouse:** Spostare il campo scalare.
     *   **Rotellina del mouse:** Zoom avanti/indietro.
     *   **Tasto destro del mouse:** Visualizza il valore del campo scalare a schermo in quel punto.
-4. Modificare i parametri del sistema utilizzando i controlli presenti nel pannello "Parametri del Modello".
+4. Modificare il tempo di valutazione del campo attraverso lo slider `T`.
+5. Modificare i parametri del sistema utilizzando i controlli presenti nel pannello "Parametri del Modello".
 
 ## Struttura della Repository
 
