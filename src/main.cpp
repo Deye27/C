@@ -96,31 +96,32 @@ static int model = 0;
 3 -> LV
 */
 
+// Nomi dei modelli
 char* modelNames[] = { "Pendolo", "Lotka-Volterra (Preda-Predatore)", "Lotka-Volterra (Competizione)", "Modello di Hodgkin-Huxley" };
 static Transform g_transform = { 0.0f, 0.0f, 1.0f };
 
-// Parametri per il modello di Hodgkin-Huxley
-static float g_I_ext = 0.0f; // Parametro corrente esterna
-static int g_bif_ID = 0; // Parametro biforcazini
-
 // Parametri per il modello di Pendolo
-static float g_L = 5.0f; // Parametro lunghezza
-static float g_gamma = 0.2f; // Parametro coefficiente d'attrito
-static float g_g = 9.81f; // Parametro gravità
-
-// Parametri per il modello di Lotka-Volterra in competizione
-static float g_r1 = 1.2;  // Tasso di crescita intrinseco della specie 1
-static float g_K1 = 3.0;  // Capacità portante della specie 1
-static float g_a12 = 2.0; // Effetto competitivo della specie 2 sulla specie 1
-static float g_r2 = 0.9;  // Tasso di crescita intrinseco della specie 2
-static float g_K2 = 5.0;  // Capacità portante della specie 2
-static float g_a21 = 1.1; // Effetto competitivo della specie 1 sulla specie 2
+static float g_L = 5.0f;           // Parametro lunghezza
+static float g_gamma = 0.2f;       // Parametro coefficiente d'attrito
+static float g_g = 9.81f;          // Parametro gravità
 
 // Parametri per il modello di Lotka-Volterra preda-predatore
-static float g_a = 0.6667f; // Tasso di crescita intrinseco delle prede
-static float g_b = 0.75f; // Tasso di predazione
-static float g_c = 1.0f; // Tasso di conversione delle prede in predatori
-static float g_d = 1.0f; // Tasso di mortalità dei predatori
+static float g_a = 0.6667f;        // Tasso di crescita intrinseco delle prede
+static float g_b = 0.75f;          // Tasso di predazione
+static float g_c = 1.0f;           // Tasso di conversione delle prede in predatori
+static float g_d = 1.0f;           // Tasso di mortalità dei predatori
+
+// Parametri per il modello di Lotka-Volterra in competizione
+static float g_r1 = 1.2;           // Tasso di crescita intrinseco della specie 1
+static float g_K1 = 3.0;           // Capacità portante della specie 1
+static float g_a12 = 2.0;          // Effetto competitivo della specie 2 sulla specie 1
+static float g_r2 = 0.9;           // Tasso di crescita intrinseco della specie 2
+static float g_K2 = 5.0;           // Capacità portante della specie 2
+static float g_a21 = 1.1;          // Effetto competitivo della specie 1 sulla specie 2
+
+// Parametri per il modello di Hodgkin-Huxley
+static float g_I_ext = 0.0f;       // Parametro corrente esterna
+static int g_bif_ID = 0;           // Parametro biforcazini
 
 // Parametri per la simulazione
 static float g_dt_slider = 0.1f;
@@ -132,12 +133,14 @@ static int g_iterations = 100;
 static int g_numSides = 7;
 static int g_blockDimX = 5;
 static int g_blockDimY = 5;
+
 // Parametri per la bounding box
 static bool g_useBoundingBox = false;
 static float g_boundingBoxMinX = 0.0f;
 static float g_boundingBoxMaxX = 1.0f;
 static float g_boundingBoxMinY = 0.0f;
 static float g_boundingBoxMaxY = 1.0f;
+
 // Parametri per lo stretch
 static float g_x_stretch = 1.0f;
 static float g_y_stretch = 1.0f;
@@ -171,7 +174,6 @@ void cleanup_cuda(float* d_distances) {
     cudaFree(d_distances);
 }
 
-// Funzioni di rendering e colormap
 // Array di colori per la colormap "seismic"
 static const ImVec3 colormap[] = {
     ImVec3(0.0f, 0.0f, 0.6f), // Blu scuro
@@ -295,7 +297,7 @@ struct PrecisionXY {
     int y;
 };
 
-int calculate_precision_axis(float length) {
+int calculate_precision_axis(float length) { // TODO: Si può trovare molto facilmente una funzione così, poi togli gli switch che sono meno efficienti
     if (length <= 0) {
         return 6;
     }
@@ -397,20 +399,6 @@ void render_axes(float scale_x, float scale_y) {
 
 void reset_parameters() {
     switch (model) {
-    case 3: // Modello di Hodgkin-Huxley
-        g_I_ext = 0.0f;
-        g_bif_ID = 0;
-        g_useBoundingBox = true;
-        g_boundingBoxMinX = -90.0f;
-        g_boundingBoxMaxX = 20.0f;
-        g_boundingBoxMinY = 0.0f;
-        g_boundingBoxMaxY = 1.0f;
-        g_x_stretch = 110.0f;
-        g_y_stretch = 1.0f;
-        g_transform.zoom = 1.0f;
-        g_transform.offsetX = 0.0f;
-        g_transform.offsetY = 0.0f;
-        break;
     case 0: // Modello di Pendolo
         g_L = 5.0f;
         g_gamma = 0.2f;
@@ -426,7 +414,23 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         break;
-    case 2: // Modello Lotka Volterra Migliorato
+    case 1: // Lotka-Volterra (Preda-Predatore)
+        g_a = 0.66666f;
+        g_b = 0.75f;
+        g_c = 1.0f;
+        g_d = 1.0f;
+        g_useBoundingBox = true;
+        g_boundingBoxMinX = 0.0f;
+        g_boundingBoxMaxX = 3.0f;
+        g_boundingBoxMinY = 0.0f;
+        g_boundingBoxMaxY = 3.0f;
+        g_x_stretch = 1.0f;
+        g_y_stretch = 1.0f;
+        g_transform.zoom = 0.5f;
+        g_transform.offsetX = 0.0f;
+        g_transform.offsetY = 0.0f;
+        break;
+    case 2: // Modello Lotka Volterra (Competizione)
         g_r1 = 1.2f;
         g_K1 = 3.0f;
         g_a12 = 2.0f;
@@ -444,21 +448,20 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         break;
-    case 1: // Lotka-Volterra
-        g_a = 0.66666f;
-        g_b = 0.75f;
-        g_c = 1.0f;
-        g_d = 1.0f;
+    case 3: // Modello di Hodgkin-Huxley
+        g_I_ext = 0.0f;
+        g_bif_ID = 0;
         g_useBoundingBox = true;
-        g_boundingBoxMinX = 0.0f;
-        g_boundingBoxMaxX = 3.0f;
+        g_boundingBoxMinX = -90.0f;
+        g_boundingBoxMaxX = 20.0f;
         g_boundingBoxMinY = 0.0f;
-        g_boundingBoxMaxY = 3.0f;
-        g_x_stretch = 1.0f;
+        g_boundingBoxMaxY = 1.0f;
+        g_x_stretch = 110.0f;
         g_y_stretch = 1.0f;
-        g_transform.zoom = 0.5f;
+        g_transform.zoom = 1.0f;
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
+        break;
     }
 }
 
@@ -558,7 +561,7 @@ static void title(bool* p_open, char* model_name)
     ImGui::SetNextWindowPos(ImVec2(window_pos.x,window_pos.y), ImGuiCond_Always, window_pos_pivot);
     ImGui::SetNextWindowViewport(viewport->ID);
     window_flags |= ImGuiWindowFlags_NoMove;
-    ImGui::SetNextWindowBgAlpha(0.8f); // Transparent background
+    ImGui::SetNextWindowBgAlpha(0.8f);
     if (ImGui::Begin(" ", p_open, window_flags))
     {
         ImGui::Text(model_name);
@@ -632,18 +635,20 @@ static void choose_model(bool* p_open)
                     {
                         larghezza_suprema = 0;
                         static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
+                        ImGui::Dummy(ImVec2(0, 3));
                         switch (selected_model) {
-                        case 3:
-                            ImGui::TextWrapped("Il modello di Hodgkin-Huxley è un modello matematico che descrive la propagazione del potenziale d'azione nei neuroni. Si basa su un sistema di equazioni differenziali non lineari che rappresentano le correnti ioniche attraverso la membrana cellulare, mediate da canali voltaggio-dipendenti per il sodio (Na+) e il potassio (K+). Il modello permette di simulare e comprendere le proprietà elettriche fondamentali delle cellule eccitabili.");
-                            break;
                         case 0:
                             ImGui::TextWrapped("Il pendolo semplice è un sistema fisico idealizzato costituito da una massa puntiforme sospesa a un filo inestensibile e di massa trascurabile, vincolato a oscillare sotto l'azione della forza di gravità. Il suo movimento è approssimativamente armonico per piccole oscillazioni. Il periodo di oscillazione dipende dalla lunghezza del filo e dall'accelerazione di gravità.");
+                            break;
+                        case 1:
+                            ImGui::TextWrapped("Il modello di Lotka-Volterra preda-predatore descrive le dinamiche di interazione tra due specie, una preda e un predatore. Le equazioni differenziali modellano la variazione delle dimensioni delle popolazioni nel tempo, considerando il tasso di crescita della preda in assenza del predatore, il tasso di predazione, il tasso di mortalità del predatore in assenza della preda, e l'efficienza di conversione della preda in nuova biomassa del predatore.");
                             break;
                         case 2:
                             ImGui::TextWrapped("Il modello di Lotka-Volterra per la competizione interspecifica descrive le dinamiche di due specie che competono per le stesse risorse. Si basa su un sistema di equazioni differenziali che modellano la variazione delle dimensioni delle popolazioni nel tempo, tenendo conto dei tassi di crescita intrinseci di ciascuna specie, della capacità portante dell'ambiente e dei coefficienti di competizione che quantificano l'impatto di una specie sull'altra.");
                             break;
-                        case 1:
-                            ImGui::TextWrapped("Il modello di Lotka-Volterra preda-predatore descrive le dinamiche di interazione tra due specie, una preda e un predatore. Le equazioni differenziali modellano la variazione delle dimensioni delle popolazioni nel tempo, considerando il tasso di crescita della preda in assenza del predatore, il tasso di predazione, il tasso di mortalità del predatore in assenza della preda, e l'efficienza di conversione della preda in nuova biomassa del predatore.");
+                        case 3:
+                            ImGui::TextWrapped("Il modello di Hodgkin-Huxley è un modello matematico che descrive la propagazione del potenziale d'azione nei neuroni. Si basa su un sistema di equazioni differenziali non lineari che rappresentano le correnti ioniche attraverso la membrana cellulare, mediate da canali voltaggio-dipendenti per il sodio (Na+) e il potassio (K+). Il modello permette di simulare e comprendere le proprietà elettriche fondamentali delle cellule eccitabili.");
+                            break;
                         }
                         ImGui::EndTabItem();
                     }
@@ -658,35 +663,9 @@ static void choose_model(bool* p_open)
                         float height_lvm = 175;
                         float height_lv = 175;
 
+                        ImGui::Dummy(ImVec2(0, 3));
+
                         switch (selected_model) {
-                        case 3: // Hodgkin-Huxley (Ridotto)
-                            larghezza_suprema = hh_image.width * height_hh / hh_image.height;
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Variabili di stato:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("V: Potenziale di membrana");
-                            ImGui::BulletText("n: Probabilità di attivazione del potassio");
-                            ImGui::Dummy(ImVec2(0, 2));
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Parametri:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("I_ext: Corrente esterna applicata");
-                            ImGui::BulletText("g_Na: Conduttanza massima del sodio");
-                            ImGui::BulletText("g_K: Conduttanza massima del potassio");
-                            ImGui::BulletText("g_L: Conduttanza di leakage");
-                            ImGui::BulletText("E_Na: Potenziale di equilibrio del sodio");
-                            ImGui::BulletText("E_K: Potenziale di equilibrio del potassio");
-                            ImGui::BulletText("E_L: Potenziale di equilibrio di leakage");
-                            ImGui::BulletText("tau_n: Costante di tempo per l'attivazione di n");
-                            ImGui::BulletText("V_mid_n: Potenziale di metà attivazione per n");
-                            ImGui::BulletText("k_n: Fattore di sensibilità per l'attivazione di n");
-
-                            ImGui::Dummy(ImVec2(0, -25));
-                            display_image_below_last_item(hh_image.id, hh_image.width, hh_image.height, height_hh);
-                            break;
-
                         case 0: // Pendolo Semplice
                             larghezza_suprema = pendulum_image.width * height_pn / pendulum_image.height;
 
@@ -705,6 +684,27 @@ static void choose_model(bool* p_open)
                             ImGui::BulletText("g: Accelerazione di gravità");
 
                             display_image_below_last_item(pendulum_image.id, pendulum_image.width, pendulum_image.height, height_pn);
+                            break;
+
+                        case 1: // Lotka-Volterra (Preda-Predatore)
+                            larghezza_suprema = lv_image.width * height_lv / lv_image.height;
+
+                            ImGui::PushFont(bold);
+                            ImGui::Text("Variabili di stato:");
+                            ImGui::PopFont();
+                            ImGui::BulletText("x: Densità di popolazione della preda");
+                            ImGui::BulletText("y: Densità di popolazione del predatore");
+                            ImGui::Dummy(ImVec2(0, 2));
+
+                            ImGui::PushFont(bold);
+                            ImGui::Text("Parametri:");
+                            ImGui::PopFont();
+                            ImGui::BulletText("a: Tasso di crescita intrinseco della preda");
+                            ImGui::BulletText("b: Tasso di incontro preda-predatore");
+                            ImGui::BulletText("c: Tasso di mortalità del predatore");
+                            ImGui::BulletText("d: Efficienza di conversione preda-predatore");
+
+                            display_image_below_last_item(lv_image.id, lv_image.width, lv_image.height, height_lv);
                             break;
 
                         case 2: // Lotka-Volterra (Competizione)
@@ -730,25 +730,31 @@ static void choose_model(bool* p_open)
                             display_image_below_last_item(lvm_image.id, lvm_image.width, lvm_image.height, height_lvm);
                             break;
 
-                        case 1: // Lotka-Volterra (Preda-Predatore)
-                            larghezza_suprema = lv_image.width * height_lv / lv_image.height;
+                        case 3: // Hodgkin-Huxley (Ridotto)
+                            larghezza_suprema = hh_image.width * height_hh / hh_image.height;
 
                             ImGui::PushFont(bold);
                             ImGui::Text("Variabili di stato:");
                             ImGui::PopFont();
-                            ImGui::BulletText("x: Densità di popolazione della preda");
-                            ImGui::BulletText("y: Densità di popolazione del predatore");
+                            ImGui::BulletText("V: Potenziale di membrana");
+                            ImGui::BulletText("n: Probabilità di attivazione del potassio");
                             ImGui::Dummy(ImVec2(0, 2));
 
                             ImGui::PushFont(bold);
                             ImGui::Text("Parametri:");
                             ImGui::PopFont();
-                            ImGui::BulletText("a: Tasso di crescita intrinseco della preda");
-                            ImGui::BulletText("b: Tasso di incontro preda-predatore");
-                            ImGui::BulletText("c: Tasso di mortalità del predatore");
-                            ImGui::BulletText("d: Efficienza di conversione preda-predatore");
+                            ImGui::BulletText("I_ext: Corrente esterna applicata");
+                            ImGui::BulletText("g_Na: Conduttanza massima del sodio");
+                            ImGui::BulletText("g_K: Conduttanza massima del potassio");
+                            ImGui::BulletText("g_L: Conduttanza di leakage");
+                            ImGui::BulletText("E_Na: Potenziale di equilibrio del sodio");
+                            ImGui::BulletText("E_K: Potenziale di equilibrio del potassio");
+                            ImGui::BulletText("E_L: Potenziale di equilibrio di leakage");
+                            ImGui::BulletText("tau_n: Costante di tempo per l'attivazione di n");
+                            ImGui::BulletText("V_mid_n: Potenziale di metà attivazione per n");
+                            ImGui::BulletText("k_n: Fattore di sensibilità per l'attivazione di n");
 
-                            display_image_below_last_item(lv_image.id, lv_image.width, lv_image.height, height_lv);
+                            display_image_below_last_item(hh_image.id, hh_image.width, hh_image.height, height_hh);
                             break;
                         }
                         ImGui::EndTabItem();
@@ -995,26 +1001,16 @@ int main(int, char**)
         ImGui::Dummy(ImVec2(0, 3));
 
         switch (model) {
-        case 3:
-            ImGui::SliderFloat("I_ext", &g_I_ext, 0.0f, 5.0f);
-            if (ImGui::BeginCombo("Tipo di Biforcazione", bifNames[g_bif_ID])) {
-                for (int n = 0; n < IM_ARRAYSIZE(bifNames); n++) {
-                    bool isSelected = (g_bif_ID == n);
-                    if (ImGui::Selectable(bifNames[n], isSelected)) {
-                        g_bif_ID = n; // Aggiorna il valore di 'g_bif_ID'
-                        // Qui potresti aggiungere azioni specifiche da eseguire al cambio di biforcazione, se necessario
-                    }
-                    if (isSelected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            break;
         case 0:
             ImGui::SliderFloat("L", &g_L, 0.0f, 10.0f);
             ImGui::SliderFloat("gamma", &g_gamma, 0.0f, 2.0f);
             ImGui::SliderFloat("g", &g_g, 0.0f, 20.0f);
+            break;
+        case 1:
+            ImGui::SliderFloat("a", &g_a, 0.0f, 5.0f);
+            ImGui::SliderFloat("b", &g_b, 0.0f, 5.0f);
+            ImGui::SliderFloat("c", &g_c, 0.0f, 5.0f);
+            ImGui::SliderFloat("d", &g_d, 0.0f, 5.0f);
             break;
         case 2:
         {
@@ -1082,11 +1078,20 @@ int main(int, char**)
             }
         }
             break;
-        case 1:
-            ImGui::SliderFloat("a", &g_a, 0.0f, 5.0f);
-            ImGui::SliderFloat("b", &g_b, 0.0f, 5.0f);
-            ImGui::SliderFloat("c", &g_c, 0.0f, 5.0f);
-            ImGui::SliderFloat("d", &g_d, 0.0f, 5.0f);
+        case 3:
+            ImGui::SliderFloat("I_ext", &g_I_ext, 0.0f, 5.0f);
+            if (ImGui::BeginCombo("Tipo di Biforcazione", bifNames[g_bif_ID])) {
+                for (int n = 0; n < IM_ARRAYSIZE(bifNames); n++) {
+                    bool isSelected = (g_bif_ID == n);
+                    if (ImGui::Selectable(bifNames[n], isSelected)) {
+                        g_bif_ID = n; // Aggiorna il valore di 'g_bif_ID'
+                    }
+                    if (isSelected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
             break;
         }
         ImGui::Dummy(ImVec2(0, 3));
@@ -1209,15 +1214,17 @@ int main(int, char**)
         PrecisionXY precision = calculate_precision(horizontal_length, vertical_length);
 
         std::stringstream ss;
-        ss << "d(" << format_number(mouse_mapped.x, precision, true) << ", " << format_number(mouse_mapped.y, precision, false) << ") = " << std::fixed << std::setprecision(5) << z_value;
-        if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+        if (z_value != -1.0f && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            ss << "C(" << std::fixed << std::setprecision(1) << g_t << ", " << format_number(mouse_mapped.x, precision, true) << ", " << format_number(mouse_mapped.y, precision, false) << ") = " << std::fixed << std::setprecision(5) << z_value;
             ImGui::GetBackgroundDrawList()->AddText(ImVec2(mouse_pos.x, mouse_pos.y - 20), IM_COL32_BLACK, ss.str().c_str());
         }
 
         // Versione
         if (g_Width > 0 && g_Height > 0)
         {
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.00-beta");
+            ImGui::PushFont(thin);
+            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.0.1-beta");
+            ImGui::PopFont();
         }
         ImGui::PopFont();
         ImGui::Render();

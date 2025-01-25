@@ -49,7 +49,6 @@ In alternativa, è possibile compilare il codice sorgente manualmente.
 *   `src`: Contiene il codice sorgente dell'applicazione.
     *   `main.cpp`: File principale dell'applicazione. Contiene il ciclo principale, la gestione degli eventi, la logica di rendering e l'interfaccia utente (ImGui).
     *   `kernel.cu`: Contiene le funzioni kernel CUDA per l'integrazione del sistema dinamico e il calcolo dell'operatore di stabilità.
-*   `documentazione`: Contiene la relazione scritta "Analisi e visualizzazione della stabilità dei sistemi dinamici".
 
 ## Licenza
 
