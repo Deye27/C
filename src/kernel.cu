@@ -68,7 +68,9 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
     // Calcola la lunghezza del poligono iniziale (c)
     float initialLength = 2 * numSides * initial_radius * sinf(M_PI / numSides);
     float finalLength = initialLength;
-    if (t_max > 0.00001f)
+
+    // Check if dt is effectively zero
+    if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integra i punti del poligono nel sistema dinamico
         float x_current, y_current, x_next, y_next;
@@ -98,6 +100,7 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
         // Calcola la lunghezza del poligono deformato (c')
         finalLength = calculate_polyline_length(pointsX, pointsY, numSides);
     }
+    // else: if dt is zero or t_max is zero, finalLength remains initialLength, so ratio is 1.
 
     // Calcola il rapporto c'/c e salvalo
     distances[y * width + x] = finalLength / initialLength;
@@ -136,7 +139,9 @@ __global__ void integrate_hh(float* distances, int width, int height, float dt, 
     // Calcola la lunghezza del poligono iniziale (c)
     float initialLength = 2 * numSides * initial_radius * sinf(M_PI / numSides);
     float finalLength = initialLength;
-    if (t_max > 0.00001f)
+
+    // Check if dt is effectively zero
+    if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integra i punti del poligono nel sistema dinamico
         float x_current, y_current, x_next, y_next;
@@ -200,6 +205,7 @@ __global__ void integrate_hh(float* distances, int width, int height, float dt, 
         // Calcola la lunghezza del poligono deformato (c')
         finalLength = calculate_polyline_length(pointsX, pointsY, numSides);
     }
+    // else: if dt is zero or t_max is zero, finalLength remains initialLength, so ratio is 1.
 
     // Calcola il rapporto c'/c e salvalo
     distances[y * width + x] = finalLength / initialLength;
@@ -238,7 +244,9 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
     // Calculate the length of the initial polygon (c)
     float initialLength = 2 * numSides * initial_radius * sinf(M_PI / numSides);
     float finalLength = initialLength;
-    if (t_max > 0.00001f)
+
+    // Check if dt is effectively zero
+    if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integrate polygon points into the dynamic system
         float x_current, y_current, x_next, y_next;
@@ -257,7 +265,7 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
                 // Calculate the next positions
                 x_next = x_current + dx * dt;
                 y_next = y_current + dy * dt;
-                
+
                 if (x_next < 0) {
                     x_next = 0;
                 }
@@ -275,6 +283,8 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
         // Calculate the length of the deformed polygon (c')
         finalLength = calculate_polyline_length(pointsX, pointsY, numSides);
     }
+    // else: if dt is zero or t_max is zero, finalLength remains initialLength, so ratio is 1.
+
 
     // Calculate the ratio c'/c and save it
     distances[y * width + x] = finalLength / initialLength;
@@ -314,7 +324,8 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
     float initialLength = 2 * numSides * initial_radius * sinf(M_PI / numSides);
     float finalLength = initialLength;
 
-    if (t_max > 0.00001f)
+    // Check if dt is effectively zero
+    if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integra i punti del poligono nel sistema dinamico
         float x_current, y_current, x_next, y_next;
@@ -352,6 +363,8 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
         // Calcola la lunghezza del poligono deformato (c')
         finalLength = calculate_polyline_length(pointsX, pointsY, numSides);
     }
+    // else: if dt is zero or t_max is zero, finalLength remains initialLength, so ratio is 1.
+
 
     // Calcola il rapporto c'/c e salvalo
     distances[y * width + x] = finalLength / initialLength;
