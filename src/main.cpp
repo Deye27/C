@@ -33,6 +33,7 @@ ImFont* bold = nullptr;
 ImFont* italic = nullptr;
 ImFont* thin = nullptr;
 ImFont* black = nullptr;
+ImFont* latex = nullptr;
 
 struct ImVec3 {
     float x, y, z;
@@ -816,6 +817,8 @@ private:
     int pushedStyleColorCount_ = 0;
 };
 
+static bool isAppPaused = false; // Variabile per tenere traccia dello stato di pausa
+
 int main(int, char**)
 {
     WNDCLASSEXW wc = { sizeof(wc), CS_OWNDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"C Viewer", nullptr };
@@ -862,6 +865,7 @@ int main(int, char**)
     italic = io.Fonts->AddFontFromFileTTF("fonts/Montserrat-Italic.ttf", 17.0f);
     thin = io.Fonts->AddFontFromFileTTF("fonts/Montserrat-ExtraLight.ttf", 17.0f);
     black = io.Fonts->AddFontFromFileTTF("fonts/Montserrat-Black.ttf", 20.0f);
+    latex = io.Fonts->AddFontFromFileTTF("fonts/cmunrm.ttf", 22.0f);
 
     loadTextures();
 
@@ -902,6 +906,11 @@ int main(int, char**)
         }
         if (done)
             break;
+        if (isAppPaused) // Controlla lo stato di pausa all'inizio del loop
+        {
+            ::Sleep(100); // Riduci il consumo di CPU quando in pausa (opzionale, regola il valore in base alle necessità)
+            continue;     // Salta il resto del loop (CUDA, rendering, ImGui)
+        }
         if (::IsIconic(hwnd))
         {
             ::Sleep(10);
@@ -1022,10 +1031,10 @@ int main(int, char**)
             ImGui::SliderFloat("a21", &g_a21, 0.0f, 5.0f);
 
             const char* presetNames[] = {
-                "Coesistenza",
                 "Esclusione Competitiva (1)",
                 "Esclusione Competitiva (2)",
-                 "Oscillazioni",
+                "Coesistenza",
+                "Esclusione Competitiva (instabile)",
             };
             static int currentPreset = -1;
 
@@ -1036,37 +1045,37 @@ int main(int, char**)
                     if (ImGui::Selectable(presetNames[n], is_selected)) {
                         currentPreset = n;
                         switch (n) {
-                        case 0: //Coesistenza
+                        case 0:  // Esclusione Competitiva (1): K1 > K2*a21 && K1*a12 > K2
                             g_r1 = 1.1f;
-                            g_K1 = 5.0f;
-                            g_a12 = 0.7f;
+                            g_K1 = 4.7f;
+                            g_a12 = 1.0f;
                             g_r2 = 0.8f;
-                            g_K2 = 7.0f;
+                            g_K2 = 2.1f;
+                            g_a21 = 0.9f;
+                            break;
+                        case 1:  // Esclusione Competitiva (2): K1 < K2*a21 && K1*a12 < K2
+                            g_r1 = 0.9f;
+                            g_K1 = 2.0f;
+                            g_a12 = 1.0f;
+                            g_r2 = 1.2f;
+                            g_K2 = 4.0f;
+                            g_a21 = 1.0f;
+                            break;
+                        case 2:  // Coesistenza: K1 > K2*a21 && K1*a12 < K2
+                            g_r1 = 1.2f;
+                            g_K1 = 4.0f;
+                            g_a12 = 0.4f;
+                            g_r2 = 0.9f;
+                            g_K2 = 4.0f;
                             g_a21 = 0.4f;
                             break;
-                        case 1: // Esclusione Competitiva (Specie 1)
+                        case 3:  // Esclusione Competitiva (instabile): K1 < K2*a21 && K1*a12 > K2
                             g_r1 = 1.2f;
-                            g_K1 = 3.0f;
-                            g_a12 = 2.0f;
+                            g_K1 = 5.7f;
+                            g_a12 = 1.66f;
                             g_r2 = 0.9f;
                             g_K2 = 5.0f;
-                            g_a21 = 1.1f;
-                            break;
-                        case 2: // Esclusione Competitiva (Specie 2)
-                            g_r1 = 1.2f;
-                            g_K1 = 3.0f;
-                            g_a12 = 1.1f;
-                            g_r2 = 0.9f;
-                            g_K2 = 5.0f;
-                            g_a21 = 2.0f;
-                            break;
-                        case 3: // Oscillazioni
-                            g_r1 = 1.0f;
-                            g_K1 = 3.0f;
-                            g_a12 = 1.5f;
-                            g_r2 = 1.1f;
-                            g_K2 = 3.0f;
-                            g_a21 = 1.5f;
+                            g_a21 = 1.31f;
                             break;
                         }
                     }
@@ -1215,18 +1224,35 @@ int main(int, char**)
 
         std::stringstream ss;
         if (z_value != -1.0f && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            ImGui::PushFont(latex);
             ss << "C(" << std::fixed << std::setprecision(1) << g_t << ", " << format_number(mouse_mapped.x, precision, true) << ", " << format_number(mouse_mapped.y, precision, false) << ") = " << std::fixed << std::setprecision(5) << z_value;
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(mouse_pos.x, mouse_pos.y - 20), IM_COL32_BLACK, ss.str().c_str());
+            std::string text = ss.str();
+            ImVec2 textSize = ImGui::CalcTextSize(text.c_str());
+            ImVec2 textPos = ImVec2(mouse_pos.x, mouse_pos.y - 20);
+            ImVec2 boxPadding = ImVec2(5.0f, 3.0f);
+            float boxRounding = 5.0f; // Raggio desiderato (anche se non sarà un vero arrotondamento)
+
+            ImVec2 boxMin = ImVec2(textPos.x - boxPadding.x, textPos.y - boxPadding.y);
+            ImVec2 boxMax = ImVec2(textPos.x + textSize.x + boxPadding.x, textPos.y + textSize.y + boxPadding.y);
+
+            // **ATTENZIONE**:  Questo potrebbe non funzionare esattamente come AddRectRoundedFilled
+            ImGui::GetBackgroundDrawList()->AddRectFilled(boxMin, boxMax, ImColor(40, 40, 40, 230), boxRounding, ImDrawFlags_RoundCornersAll); // Prova con ImDrawFlags_RoundCornersAll
+
+            ImGui::GetBackgroundDrawList()->AddText(textPos, IM_COL32_WHITE, text.c_str());
+            ImGui::PopFont();
         }
 
         // Versione
         if (g_Width > 0 && g_Height > 0)
         {
             ImGui::PushFont(thin);
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.0.1-beta");
+            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.1.0-beta");
             ImGui::PopFont();
         }
         ImGui::PopFont();
+        ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
+        ImVec2 origin_screen = ImVec2(g_Width / 2.0f - g_transform.offsetX, g_Height / 2.0f - g_transform.offsetY);
+        draw_list->AddCircleFilled(origin_screen, 2.0f, IM_COL32_BLACK);
         ImGui::Render();
         glViewport(0, 0, g_Width, g_Height);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1289,8 +1315,20 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
         return true;
+
     switch (msg)
     {
+    case WM_ACTIVATEAPP: // Gestisci WM_ACTIVATEAPP per rilevare la pausa
+    {
+        if (wParam == WA_INACTIVE) {
+            isAppPaused = true;
+        }
+        else {
+            isAppPaused = false;
+        }
+        return 0;
+    }
+
     case WM_SIZE:
         if (wParam != SIZE_MINIMIZED)
         {
