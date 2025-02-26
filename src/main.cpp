@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <windows.h>
 #include <GL/GL.h>
+#include <algorithm> // Include for std::clamp
 #include <tchar.h>
 #include <cmath>
 #include <sstream>
@@ -24,6 +25,10 @@
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
+
+#ifndef IM_CLAMP
+#define IM_CLAMP(V, MN, MX)     ((V) < (MN) ? (MN) : ((V) > (MX) ? (MX) : (V)))
 #endif
 
 //FONTS
@@ -120,6 +125,10 @@ static float g_r2 = 0.9;           // Tasso di crescita intrinseco della specie 
 static float g_K2 = 5.0;           // Capacità portante della specie 2
 static float g_a21 = 1.1;          // Effetto competitivo della specie 1 sulla specie 2
 
+float g_r1_K1[2] = { 1.0f, 3.0f }; // r1 e K1 in un array
+float g_r2_K2[2] = { 0.5f, 8.0f };  // r2 e K2 in un array
+float g_a12_a21[2] = { 0.2f, 0.3f }; // a12 e a21 in un array
+
 // Parametri per il modello di Hodgkin-Huxley
 static float g_I_ext = 0.0f;       // Parametro corrente esterna
 static int g_bif_ID = 0;           // Parametro biforcazini
@@ -148,9 +157,13 @@ static float g_y_stretch = 1.0f;
 
 static bool is_model_parameters_expanded = true;
 
-extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY);
+// Parametri per la maschera
+static bool g_useMask = false;
+static float g_maskRadiusPercentage = 25.0f; // Radius in percentage
 
-// Funzione CPU per la maschera
+extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius);
+
+// Funzione CPU per la maschera (non più usata, la logica è in CUDA)
 bool mask_function(float x, float y) {
     float centerX = 0.0f;
     float centerY = 0.0f;
@@ -239,7 +252,7 @@ ImVec2 transform_coordinates(int x, int y, float scale_x, float scale_y)
 
 }
 
-void render_scalar_field(float* distances) {
+void render_scalar_field(float* distances, bool useMask, float maskRadiusPixels) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, g_Width, g_Height, 0, -1, 1);
@@ -249,19 +262,36 @@ void render_scalar_field(float* distances) {
     glBegin(GL_QUADS);
     for (int y = 0; y < g_Height; ++y) {
         for (int x = 0; x < g_Width; ++x) {
+            float pixel_x = static_cast<float>(x);
+            float pixel_y = static_cast<float>(y);
+            float maskCenterXPixels = g_Width * 0.5f;  // Center of the screen
+            float maskCenterYPixels = g_Height * 0.5f; // Center of the screen
+
+            // Check if the point is outside the mask *before* checking the distance value
+            if (useMask) {
+                float dist_sq = (pixel_x - maskCenterXPixels) * (pixel_x - maskCenterXPixels) +
+                    (pixel_y - maskCenterYPixels) * (pixel_y - maskCenterYPixels);
+                if (dist_sq > maskRadiusPixels * maskRadiusPixels) {
+                    glColor3f(0.45f, 0.45f, 0.4f); // Dark gray
+                    glVertex2f(pixel_x, pixel_y);
+                    glVertex2f(pixel_x + 1.0f, pixel_y);
+                    glVertex2f(pixel_x + 1.0f, pixel_y + 1.0f);
+                    glVertex2f(pixel_x, pixel_y + 1.0f);
+                    continue; // Skip to the next pixel
+                }
+            }
 
             // Calcola il valore del campo scalare dalla matrice delle distanze
             float value = distances[y * g_Width + x];
 
             // Se il valore è negativo, significa che il pixel è fuori dalla bounding box
-            if (value < 0)
-            {
-                glColor3f(0.8f, 0.8f, 0.8f); // Colore grigio chiaro
+            if (value < 0) {
+                glColor3f(0.8f, 0.8f, 0.8f); // Light gray
                 glVertex2f(static_cast<float>(x), static_cast<float>(y));
                 glVertex2f(static_cast<float>(x + 1), static_cast<float>(y));
                 glVertex2f(static_cast<float>(x + 1), static_cast<float>(y + 1));
                 glVertex2f(static_cast<float>(x), static_cast<float>(y + 1));
-                continue;
+                continue; // Skip to the next pixel
             }
 
             // Ottieni il colore dalla colormap
@@ -414,6 +444,8 @@ void reset_parameters() {
         g_transform.zoom = 0.2f;
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
+        g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskRadiusPercentage = 25.0f;
         break;
     case 1: // Lotka-Volterra (Preda-Predatore)
         g_a = 0.66666f;
@@ -430,6 +462,8 @@ void reset_parameters() {
         g_transform.zoom = 0.5f;
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
+        g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskRadiusPercentage = 25.0f;
         break;
     case 2: // Modello Lotka Volterra (Competizione)
         g_r1 = 1.2f;
@@ -448,6 +482,8 @@ void reset_parameters() {
         g_transform.zoom = 0.5f;
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
+        g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskRadiusPercentage = 25.0f;
         break;
     case 3: // Modello di Hodgkin-Huxley
         g_I_ext = 0.0f;
@@ -462,6 +498,8 @@ void reset_parameters() {
         g_transform.zoom = 1.0f;
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
+        g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskRadiusPercentage = 25.0f;
         break;
     }
 }
@@ -559,7 +597,7 @@ static void title(bool* p_open, char* model_name)
     window_pos_pivot.x = 0.5f;
     window_pos_pivot.y = 0.0f;
     ImGui::PushFont(black);
-    ImGui::SetNextWindowPos(ImVec2(window_pos.x,window_pos.y), ImGuiCond_Always, window_pos_pivot);
+    ImGui::SetNextWindowPos(ImVec2(window_pos.x, window_pos.y), ImGuiCond_Always, window_pos_pivot);
     ImGui::SetNextWindowViewport(viewport->ID);
     window_flags |= ImGuiWindowFlags_NoMove;
     ImGui::SetNextWindowBgAlpha(0.8f);
@@ -575,213 +613,213 @@ static int selected_model = 0;
 static bool just_chosen = false;
 
 static void choose_model(bool* p_open)
+{
+    static int larghezza_suprema = 0;
+
+    ImVec2 window_pos;
+    window_pos.x = 20;
+    window_pos.y = 80;
+
+    ImGui::SetNextWindowPos(window_pos, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(0, 500));
+    if (ImGui::Begin("Scegli Modello", p_open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse))
     {
-        static int larghezza_suprema = 0;
-
-        ImVec2 window_pos;
-        window_pos.x = 20;
-        window_pos.y = 80;
-
-        ImGui::SetNextWindowPos(window_pos, ImGuiCond_Appearing);
-        ImGui::SetNextWindowSize(ImVec2(0, 500));
-        if (ImGui::Begin("Scegli Modello", p_open, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse))
+        // Left
         {
-            // Left
+            ImGui::BeginChild("Pannello sinistro", ImVec2(275, 0), ImGuiChildFlags_Borders);
+            ImGui::Text("Modelli disponibili:");
+            ImGui::Dummy(ImVec2(0, 2));
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 2));
+            for (int i = 0; i < IM_ARRAYSIZE(modelNames); i++)
             {
-                ImGui::BeginChild("Pannello sinistro", ImVec2(275, 0), ImGuiChildFlags_Borders);
-                ImGui::Text("Modelli disponibili:");
-                ImGui::Dummy(ImVec2(0, 2));
-                ImGui::Separator();
-                ImGui::Dummy(ImVec2(0, 2));
-                for (int i = 0; i < IM_ARRAYSIZE(modelNames); i++)
+                bool is_selected = (selected_model == i);
+
+                if (is_selected) {
+                    ImGui::PushFont(bold);
+                }
+
+                if (ImGui::Selectable(modelNames[i], is_selected))
                 {
-                    bool is_selected = (selected_model == i);
-
-                    if (is_selected) {
-                        ImGui::PushFont(bold);
-                    }
-
-                    if (ImGui::Selectable(modelNames[i], is_selected))
-                    {
-                        selected_model = i;
-                    }
-
-                    if (is_selected) {
-                        ImGui::PopFont();
-                    }
-
-                    ImGui::Dummy(ImVec2(0, 2));
+                    selected_model = i;
                 }
-                ImGui::EndChild();
-            }
-            ImGui::SameLine();
 
-            // Right
-            {
-                float static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
+                if (is_selected) {
+                    ImGui::PopFont();
+                }
 
-                ImGui::BeginGroup();
-                ImGui::BeginChild("Vista elementi", ImVec2(std::max((float)larghezza_suprema, static_width) + 50.0f, -ImGui::GetFrameHeightWithSpacing() - 10.0f)); // Leave room for 1 line below us
-                ImGui::Dummy(ImVec2(0, 3));
-                ImGui::PushFont(bold);
-                ImGui::Text("Sistema Dinamico: %s", modelNames[selected_model]);
-                ImGui::PopFont();
                 ImGui::Dummy(ImVec2(0, 2));
-                ImGui::Separator();
-                ImGui::Dummy(ImVec2(0, 2));
-
-                if (ImGui::BeginTabBar("##Schede", ImGuiTabBarFlags_None))
-                {
-                    if (ImGui::BeginTabItem("Descrizione"))
-                    {
-                        larghezza_suprema = 0;
-                        static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
-                        ImGui::Dummy(ImVec2(0, 3));
-                        switch (selected_model) {
-                        case 0:
-                            ImGui::TextWrapped("Il pendolo semplice è un sistema fisico idealizzato costituito da una massa puntiforme sospesa a un filo inestensibile e di massa trascurabile, vincolato a oscillare sotto l'azione della forza di gravità. Il suo movimento è approssimativamente armonico per piccole oscillazioni. Il periodo di oscillazione dipende dalla lunghezza del filo e dall'accelerazione di gravità.");
-                            break;
-                        case 1:
-                            ImGui::TextWrapped("Il modello di Lotka-Volterra preda-predatore descrive le dinamiche di interazione tra due specie, una preda e un predatore. Le equazioni differenziali modellano la variazione delle dimensioni delle popolazioni nel tempo, considerando il tasso di crescita della preda in assenza del predatore, il tasso di predazione, il tasso di mortalità del predatore in assenza della preda, e l'efficienza di conversione della preda in nuova biomassa del predatore.");
-                            break;
-                        case 2:
-                            ImGui::TextWrapped("Il modello di Lotka-Volterra per la competizione interspecifica descrive le dinamiche di due specie che competono per le stesse risorse. Si basa su un sistema di equazioni differenziali che modellano la variazione delle dimensioni delle popolazioni nel tempo, tenendo conto dei tassi di crescita intrinseci di ciascuna specie, della capacità portante dell'ambiente e dei coefficienti di competizione che quantificano l'impatto di una specie sull'altra.");
-                            break;
-                        case 3:
-                            ImGui::TextWrapped("Il modello di Hodgkin-Huxley è un modello matematico che descrive la propagazione del potenziale d'azione nei neuroni. Si basa su un sistema di equazioni differenziali non lineari che rappresentano le correnti ioniche attraverso la membrana cellulare, mediate da canali voltaggio-dipendenti per il sodio (Na+) e il potassio (K+). Il modello permette di simulare e comprendere le proprietà elettriche fondamentali delle cellule eccitabili.");
-                            break;
-                        }
-                        ImGui::EndTabItem();
-                    }
-                    if (ImGui::BeginTabItem("Dettagli"))
-                    {
-                        // Calcola la larghezza massima necessaria per la visualizzazione, basandosi sul testo o sull'immagine.
-                        static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
-
-                        // Definisci le altezze desiderate per le immagini.
-                        float height_hh = 350;
-                        float height_pn = 175;
-                        float height_lvm = 175;
-                        float height_lv = 175;
-
-                        ImGui::Dummy(ImVec2(0, 3));
-
-                        switch (selected_model) {
-                        case 0: // Pendolo Semplice
-                            larghezza_suprema = pendulum_image.width * height_pn / pendulum_image.height;
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Variabili di stato:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("theta: Angolo rispetto alla verticale");
-                            ImGui::BulletText("omega: Velocità angolare");
-                            ImGui::Dummy(ImVec2(0, 2));
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Parametri:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("L: Lunghezza del pendolo");
-                            ImGui::BulletText("gamma: Coefficiente di attrito viscoso");
-                            ImGui::BulletText("g: Accelerazione di gravità");
-
-                            display_image_below_last_item(pendulum_image.id, pendulum_image.width, pendulum_image.height, height_pn);
-                            break;
-
-                        case 1: // Lotka-Volterra (Preda-Predatore)
-                            larghezza_suprema = lv_image.width * height_lv / lv_image.height;
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Variabili di stato:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("x: Densità di popolazione della preda");
-                            ImGui::BulletText("y: Densità di popolazione del predatore");
-                            ImGui::Dummy(ImVec2(0, 2));
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Parametri:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("a: Tasso di crescita intrinseco della preda");
-                            ImGui::BulletText("b: Tasso di incontro preda-predatore");
-                            ImGui::BulletText("c: Tasso di mortalità del predatore");
-                            ImGui::BulletText("d: Efficienza di conversione preda-predatore");
-
-                            display_image_below_last_item(lv_image.id, lv_image.width, lv_image.height, height_lv);
-                            break;
-
-                        case 2: // Lotka-Volterra (Competizione)
-                            larghezza_suprema = lvm_image.width * height_lvm / lvm_image.height;
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Variabili di stato:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("N1: Densità di popolazione della specie 1");
-                            ImGui::BulletText("N2: Densità di popolazione della specie 2");
-                            ImGui::Dummy(ImVec2(0, 2));
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Parametri:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("r1: Tasso di crescita intrinseco della specie 1");
-                            ImGui::BulletText("K1: Capacità portante per la specie 1");
-                            ImGui::BulletText("a12: Coefficiente di competizione di 2 su 1");
-                            ImGui::BulletText("r2: Tasso di crescita intrinseco della specie 2");
-                            ImGui::BulletText("K2: Capacità portante per la specie 2");
-                            ImGui::BulletText("a21: Coefficiente di competizione di 1 su 2");
-
-                            display_image_below_last_item(lvm_image.id, lvm_image.width, lvm_image.height, height_lvm);
-                            break;
-
-                        case 3: // Hodgkin-Huxley (Ridotto)
-                            larghezza_suprema = hh_image.width * height_hh / hh_image.height;
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Variabili di stato:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("V: Potenziale di membrana");
-                            ImGui::BulletText("n: Probabilità di attivazione del potassio");
-                            ImGui::Dummy(ImVec2(0, 2));
-
-                            ImGui::PushFont(bold);
-                            ImGui::Text("Parametri:");
-                            ImGui::PopFont();
-                            ImGui::BulletText("I_ext: Corrente esterna applicata");
-                            ImGui::BulletText("g_Na: Conduttanza massima del sodio");
-                            ImGui::BulletText("g_K: Conduttanza massima del potassio");
-                            ImGui::BulletText("g_L: Conduttanza di leakage");
-                            ImGui::BulletText("E_Na: Potenziale di equilibrio del sodio");
-                            ImGui::BulletText("E_K: Potenziale di equilibrio del potassio");
-                            ImGui::BulletText("E_L: Potenziale di equilibrio di leakage");
-                            ImGui::BulletText("tau_n: Costante di tempo per l'attivazione di n");
-                            ImGui::BulletText("V_mid_n: Potenziale di metà attivazione per n");
-                            ImGui::BulletText("k_n: Fattore di sensibilità per l'attivazione di n");
-
-                            display_image_below_last_item(hh_image.id, hh_image.width, hh_image.height, height_hh);
-                            break;
-                        }
-                        ImGui::EndTabItem();
-                    }
-                    ImGui::EndTabBar();
-                }
-                ImGui::EndChild();
-                // Posiziona il pulsante "OK" in basso a destra
-                ImGui::Dummy(ImVec2(0, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing())); // Spazio vuoto prima del pulsante
-                ImGui::Dummy(ImVec2(0, 5.0f));
-                ImGui::SetCursorPosX((ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("OK").x - ImGui::GetStyle().FramePadding.x) / 2 + 100); // Posiziona il pulsante
-                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 10.0f);
-                if (ImGui::Button("Ok")) {
-                    model = selected_model;
-                    reset_parameters();
-                    *p_open = false;
-                    is_model_parameters_expanded = true;
-                    just_chosen = true;
-                }
-                //ImGui::Dummy(ImVec2(0, 2.0f));
-
-                ImGui::EndGroup();
             }
+            ImGui::EndChild();
         }
-        ImGui::End();
+        ImGui::SameLine();
+
+        // Right
+        {
+            float static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
+
+            ImGui::BeginGroup();
+            ImGui::BeginChild("Vista elementi", ImVec2(std::max((float)larghezza_suprema, static_width) + 50.0f, -ImGui::GetFrameHeightWithSpacing() - 10.0f)); // Leave room for 1 line below us
+            ImGui::Dummy(ImVec2(0, 3));
+            ImGui::PushFont(bold);
+            ImGui::Text("Sistema Dinamico: %s", modelNames[selected_model]);
+            ImGui::PopFont();
+            ImGui::Dummy(ImVec2(0, 2));
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 2));
+
+            if (ImGui::BeginTabBar("##Schede", ImGuiTabBarFlags_None))
+            {
+                if (ImGui::BeginTabItem("Descrizione"))
+                {
+                    larghezza_suprema = 0;
+                    static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
+                    ImGui::Dummy(ImVec2(0, 3));
+                    switch (selected_model) {
+                    case 0:
+                        ImGui::TextWrapped("Il pendolo semplice è un sistema fisico idealizzato costituito da una massa puntiforme sospesa a un filo inestensibile e di massa trascurabile, vincolato a oscillare sotto l'azione della forza di gravità. Il suo movimento è approssimativamente armonico per piccole oscillazioni. Il periodo di oscillazione dipende dalla lunghezza del filo e dall'accelerazione di gravità.");
+                        break;
+                    case 1:
+                        ImGui::TextWrapped("Il modello di Lotka-Volterra preda-predatore descrive le dinamiche di interazione tra due specie, una preda e un predatore. Le equazioni differenziali modellano la variazione delle dimensioni delle popolazioni nel tempo, considerando il tasso di crescita della preda in assenza del predatore, il tasso di predazione, il tasso di mortalità del predatore in assenza della preda, e l'efficienza di conversione della preda in nuova biomassa del predatore.");
+                        break;
+                    case 2:
+                        ImGui::TextWrapped("Il modello di Lotka-Volterra per la competizione interspecifica descrive le dinamiche di due specie che competono per le stesse risorse. Si basa su un sistema di equazioni differenziali che modellano la variazione delle dimensioni delle popolazioni nel tempo, tenendo conto dei tassi di crescita intrinseci di ciascuna specie, della capacità portante dell'ambiente e dei coefficienti di competizione che quantificano l'impatto di una specie sull'altra.");
+                        break;
+                    case 3:
+                        ImGui::TextWrapped("Il modello di Hodgkin-Huxley è un modello matematico che descrive la propagazione del potenziale d'azione nei neuroni. Si basa su un sistema di equazioni differenziali non lineari che rappresentano le correnti ioniche attraverso la membrana cellulare, mediate da canali voltaggio-dipendenti per il sodio (Na+) e il potassio (K+). Il modello permette di simulare e comprendere le proprietà elettriche fondamentali delle cellule eccitabili.");
+                        break;
+                    }
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Dettagli"))
+                {
+                    // Calcola la larghezza massima necessaria per la visualizzazione, basandosi sul testo o sull'immagine.
+                    static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
+
+                    // Definisci le altezze desiderate per le immagini.
+                    float height_hh = 350;
+                    float height_pn = 175;
+                    float height_lvm = 175;
+                    float height_lv = 175;
+
+                    ImGui::Dummy(ImVec2(0, 3));
+
+                    switch (selected_model) {
+                    case 0: // Pendolo Semplice
+                        larghezza_suprema = pendulum_image.width * height_pn / pendulum_image.height;
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Variabili di stato:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("theta: Angolo rispetto alla verticale");
+                        ImGui::BulletText("omega: Velocità angolare");
+                        ImGui::Dummy(ImVec2(0, 2));
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Parametri:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("L: Lunghezza del pendolo");
+                        ImGui::BulletText("gamma: Coefficiente di attrito viscoso");
+                        ImGui::BulletText("g: Accelerazione di gravità");
+
+                        display_image_below_last_item(pendulum_image.id, pendulum_image.width, pendulum_image.height, height_pn);
+                        break;
+
+                    case 1: // Lotka-Volterra (Preda-Predatore)
+                        larghezza_suprema = lv_image.width * height_lv / lv_image.height;
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Variabili di stato:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("x: Densità di popolazione della preda");
+                        ImGui::BulletText("y: Densità di popolazione del predatore");
+                        ImGui::Dummy(ImVec2(0, 2));
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Parametri:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("a: Tasso di crescita intrinseco della preda");
+                        ImGui::BulletText("b: Tasso di incontro preda-predatore");
+                        ImGui::BulletText("c: Tasso di mortalità del predatore");
+                        ImGui::BulletText("d: Efficienza di conversione preda-predatore");
+
+                        display_image_below_last_item(lv_image.id, lv_image.width, lv_image.height, height_lv);
+                        break;
+
+                    case 2: // Lotka-Volterra (Competizione)
+                        larghezza_suprema = lvm_image.width * height_lvm / lvm_image.height;
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Variabili di stato:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("N1: Densità di popolazione della specie 1");
+                        ImGui::BulletText("N2: Densità di popolazione della specie 2");
+                        ImGui::Dummy(ImVec2(0, 2));
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Parametri:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("r1: Tasso di crescita intrinseco della specie 1");
+                        ImGui::BulletText("K1: Capacità portante per la specie 1");
+                        ImGui::BulletText("a12: Coefficiente di competizione di 2 su 1");
+                        ImGui::BulletText("r2: Tasso di crescita intrinseco della specie 2");
+                        ImGui::BulletText("K2: Capacità portante per la specie 2");
+                        ImGui::BulletText("a21: Coefficiente di competizione di 1 su 2");
+
+                        display_image_below_last_item(lvm_image.id, lvm_image.width, lvm_image.height, height_lvm);
+                        break;
+
+                    case 3: // Hodgkin-Huxley (Ridotto)
+                        larghezza_suprema = hh_image.width * height_hh / hh_image.height;
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Variabili di stato:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("V: Potenziale di membrana");
+                        ImGui::BulletText("n: Probabilità di attivazione del potassio");
+                        ImGui::Dummy(ImVec2(0, 2));
+
+                        ImGui::PushFont(bold);
+                        ImGui::Text("Parametri:");
+                        ImGui::PopFont();
+                        ImGui::BulletText("I_ext: Corrente esterna applicata");
+                        ImGui::BulletText("g_Na: Conduttanza massima del sodio");
+                        ImGui::BulletText("g_K: Conduttanza massima del potassio");
+                        ImGui::BulletText("g_L: Conduttanza di leakage");
+                        ImGui::BulletText("E_Na: Potenziale di equilibrio del sodio");
+                        ImGui::BulletText("E_K: Potenziale di equilibrio del potassio");
+                        ImGui::BulletText("E_L: Potenziale di equilibrio di leakage");
+                        ImGui::BulletText("tau_n: Costante di tempo per l'attivazione di n");
+                        ImGui::BulletText("V_mid_n: Potenziale di metà attivazione per n");
+                        ImGui::BulletText("k_n: Fattore di sensibilità per l'attivazione di n");
+
+                        display_image_below_last_item(hh_image.id, hh_image.width, hh_image.height, height_hh);
+                        break;
+                    }
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
+            ImGui::EndChild();
+            // Posiziona il pulsante "OK" in basso a destra
+            ImGui::Dummy(ImVec2(0, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing())); // Spazio vuoto prima del pulsante
+            ImGui::Dummy(ImVec2(0, 5.0f));
+            ImGui::SetCursorPosX((ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("OK").x - ImGui::GetStyle().FramePadding.x) / 2 + 100); // Posiziona il pulsante
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 10.0f);
+            if (ImGui::Button("Ok")) {
+                model = selected_model;
+                reset_parameters();
+                *p_open = false;
+                is_model_parameters_expanded = true;
+                just_chosen = true;
+            }
+            //ImGui::Dummy(ImVec2(0, 2.0f));
+
+            ImGui::EndGroup();
+        }
     }
+    ImGui::End();
+}
 
 class MyStyleManager {
 public:
@@ -960,9 +998,14 @@ int main(int, char**)
             g_transform.offsetY -= ImGui::GetIO().MouseDelta.y;
         }
 
+        // Center mask coordinates are now fixed to screen center
+        float maskCenterXPixels = g_Width * 0.5f;
+        float maskCenterYPixels = g_Height * 0.5f;
+        float maskRadiusPixels = (g_maskRadiusPercentage / 100.0f) * (g_Width / 2.0f); // Radius as percentage of screen width
+
         // Esegui l'integrazione con CUDA solo se nencessario
         if (!is_choosing) {
-            run_cuda_kernel(model, g_Width, g_Height, d_distances, g_dt, g_t, g_transform.offsetX, g_transform.offsetY, g_transform.zoom, g_x_stretch, g_y_stretch, g_I_ext, g_bif_ID, g_L, g_gamma, g_g, g_r1, g_K1, g_a12, g_r2, g_K2, g_a21, g_a, g_b, g_c, g_d, gpu_scale, g_numSides, g_blockDimX, g_blockDimY, g_useBoundingBox, g_boundingBoxMinX, g_boundingBoxMaxX, g_boundingBoxMinY, g_boundingBoxMaxY);
+            run_cuda_kernel(model, g_Width, g_Height, d_distances, g_dt, g_t, g_transform.offsetX, g_transform.offsetY, g_transform.zoom, g_x_stretch, g_y_stretch, g_I_ext, g_bif_ID, g_L, g_gamma, g_g, g_r1, g_K1, g_a12, g_r2, g_K2, g_a21, g_a, g_b, g_c, g_d, gpu_scale, g_numSides, g_blockDimX, g_blockDimY, g_useBoundingBox, g_boundingBoxMinX, g_boundingBoxMaxX, g_boundingBoxMinY, g_boundingBoxMaxY, g_useMask, maskCenterXPixels, maskCenterYPixels, maskRadiusPixels);
         }
         // Copia i dati dalla GPU alla CPU
         copy_distances_to_host(h_distances, d_distances, g_Width, g_Height);
@@ -972,7 +1015,7 @@ int main(int, char**)
         ImGui::SetNextWindowPos(ImVec2(20, 35), ImGuiCond_Once);
         ImGui::PushFont(bold);
 
-        ImGui::SetNextWindowCollapsed(false, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowCollapsed(false, ImGuiCond_Once); // Espandi la finestra al primo avvio
 
         if (is_choosing) {
             ImGui::SetNextWindowCollapsed(!is_model_parameters_expanded);
@@ -1023,12 +1066,21 @@ int main(int, char**)
             break;
         case 2:
         {
-            ImGui::SliderFloat("r1", &g_r1, 0.0f, 5.0f);
-            ImGui::SliderFloat("K1", &g_K1, 0.0f, 20.0f);
-            ImGui::SliderFloat("a12", &g_a12, 0.0f, 5.0f);
-            ImGui::SliderFloat("r2", &g_r2, 0.0f, 5.0f);
-            ImGui::SliderFloat("K2", &g_K2, 0.0f, 20.0f);
-            ImGui::SliderFloat("a21", &g_a21, 0.0f, 5.0f);
+            float r1_K1_temp[2] = { g_r1, g_K1 };
+            float r2_K2_temp[2] = { g_r2, g_K2 };
+            float a12_a21_temp[2] = { g_a12, g_a21 };
+
+            ImGui::DragFloat2("Specie 1 (r1, K1)", r1_K1_temp, 0.1f, 0.0f, 20.0f, "%.2f");
+            g_r1 = r1_K1_temp[0];
+            g_K1 = r1_K1_temp[1];
+
+            ImGui::DragFloat2("Specie 2 (r2, K2)", r2_K2_temp, 0.1f, 0.0f, 20.0f, "%.2f");
+            g_r2 = r2_K2_temp[0];
+            g_K2 = r2_K2_temp[1];
+
+            ImGui::DragFloat2("(a12, a21)", a12_a21_temp, 0.1f, 0.0f, 5.0f, "%.2f");
+            g_a12 = a12_a21_temp[0];
+            g_a21 = a12_a21_temp[1];
 
             const char* presetNames[] = {
                 "Esclusione Competitiva (1)",
@@ -1086,7 +1138,7 @@ int main(int, char**)
                 ImGui::EndCombo();
             }
         }
-            break;
+        break;
         case 3:
             ImGui::SliderFloat("I_ext", &g_I_ext, 0.0f, 5.0f);
             if (ImGui::BeginCombo("Tipo di Biforcazione", bifNames[g_bif_ID])) {
@@ -1124,7 +1176,7 @@ int main(int, char**)
             g_dt = g_t / g_iterations;
             ImGui::SliderFloat("T", &g_t, 0.0f, g_t_max);
             if (g_t < 0) {
-;                g_t = 0;
+                ;                g_t = 0;
             }
             ImGui::SliderInt("Numero Vertici", &g_numSides, 3, 50);
             ImGui::Dummy(ImVec2(0, 3));
@@ -1145,6 +1197,10 @@ int main(int, char**)
                 ImGui::DragFloatRange2("X", &g_boundingBoxMinX, &g_boundingBoxMaxX, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::DragFloatRange2("Y", &g_boundingBoxMinY, &g_boundingBoxMaxY, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
             };
+            ImGui::Checkbox("Utilizza Maschera", &g_useMask);
+            if (g_useMask) {
+                ImGui::SliderFloat("Raggio (%)", &g_maskRadiusPercentage, 0.0f, 100.0f, "%.1f%%"); // Radius in percentage
+            }
             ImGui::TreePop();
         }
 
@@ -1170,11 +1226,39 @@ int main(int, char**)
 
         if (ImGui::Button("Reimposta Visuale"))
         {
+            switch (model) {
+            case 0:
+                g_x_stretch = 1.0f;
+                g_y_stretch = 1.0f;
+                g_transform.zoom = 0.2f;
+                g_transform.offsetX = 0.0f;
+                g_transform.offsetY = 0.0f;
+                break;
+            case 1:
+                g_x_stretch = 1.0f;
+                g_y_stretch = 1.0f;
+                g_transform.zoom = 0.5f;
+                g_transform.offsetX = 0.0f;
+                g_transform.offsetY = 0.0f;
+                break;
+            case 2:
+                g_x_stretch = 1.0f;
+                g_y_stretch = 1.0f;
+                g_transform.zoom = 0.5f;
+                g_transform.offsetX = 0.0f;
+                g_transform.offsetY = 0.0f;
+                break;
+            case 3:
+                g_x_stretch = 110.0f;
+                g_y_stretch = 1.0f;
+                g_transform.zoom = 1.0f;
+                g_transform.offsetX = 0.0f;
+                g_transform.offsetY = 0.0f;
+                break;
+            }
             g_blockDimX = 5;
             g_blockDimY = 5;
-            g_transform.zoom = 1.0f;
-            g_transform.offsetX = 0.0f;
-            g_transform.offsetY = 0.0f;
+            g_useMask = false;
         }
         ImGui::SetItemTooltip("Reimposta lo zoom e la tralsazione.", ImGui::GetStyle().HoverDelayNormal);
 
@@ -1235,8 +1319,7 @@ int main(int, char**)
             ImVec2 boxMin = ImVec2(textPos.x - boxPadding.x, textPos.y - boxPadding.y);
             ImVec2 boxMax = ImVec2(textPos.x + textSize.x + boxPadding.x, textPos.y + textSize.y + boxPadding.y);
 
-            // **ATTENZIONE**:  Questo potrebbe non funzionare esattamente come AddRectRoundedFilled
-            ImGui::GetBackgroundDrawList()->AddRectFilled(boxMin, boxMax, ImColor(40, 40, 40, 230), boxRounding, ImDrawFlags_RoundCornersAll); // Prova con ImDrawFlags_RoundCornersAll
+            ImGui::GetBackgroundDrawList()->AddRectFilled(boxMin, boxMax, ImColor(40, 40, 40, 230), boxRounding, ImDrawFlags_RoundCornersAll);
 
             ImGui::GetBackgroundDrawList()->AddText(textPos, IM_COL32_WHITE, text.c_str());
             ImGui::PopFont();
@@ -1246,18 +1329,27 @@ int main(int, char**)
         if (g_Width > 0 && g_Height > 0)
         {
             ImGui::PushFont(thin);
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.1.0-beta");
+            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.1.2-beta");
             ImGui::PopFont();
         }
         ImGui::PopFont();
+
+        // Draw mask overlay if enabled
+        if (g_useMask) {
+            ImDrawList* bg_draw_list = ImGui::GetBackgroundDrawList(); // Get background draw list
+            ImVec2 center = ImVec2(maskCenterXPixels, maskCenterYPixels);
+            float radius = maskRadiusPixels;
+            bg_draw_list->AddCircle(center, radius, ImColor(255, 255, 255, 255), 0, 2.5f); // Fully opaque white outline, thicker
+        }
+
         ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
         ImVec2 origin_screen = ImVec2(g_Width / 2.0f - g_transform.offsetX, g_Height / 2.0f - g_transform.offsetY);
-        draw_list->AddCircleFilled(origin_screen, 2.0f, IM_COL32_BLACK);
+        draw_list->AddCircleFilled(origin_screen, 3.0f, IM_COL32_BLACK);
         ImGui::Render();
         glViewport(0, 0, g_Width, g_Height);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        render_scalar_field(h_distances);
+        render_scalar_field(h_distances, g_useMask, maskRadiusPixels); // Pass mask parameters
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {

@@ -36,11 +36,22 @@ __device__ float sigmoid_gpu(float x) {
 }
 
 // Kernel CUDA per il modello di Pendulum
-__global__ void integrate_pn(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float L, float gamma, float g, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY) {
+__global__ void integrate_pn(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float L, float gamma, float g, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height) return;
+
+    // Applica la maschera per prima cosa
+    if (useMask) {
+        float pixel_x = (float)x; // Screen x-coordinate
+        float pixel_y = (float)y; // Screen y-coordinate
+        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+        if (dist_sq > maskRadius * maskRadius) {
+            distances[y * width + x] = -1.0f;
+            return;
+        }
+    }
 
     // Mappa le coordinate dei pixel nello spazio matematico
     float centeredX = (float)x - width / 2.0f;
@@ -107,11 +118,22 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
 }
 
 // Kernel CUDA per il modello di Hodgkin-Huxley
-__global__ void integrate_hh(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY) {
+__global__ void integrate_hh(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height) return;
+
+    // Applica la maschera per prima cosa
+    if (useMask) {
+        float pixel_x = (float)x; // Screen x-coordinate
+        float pixel_y = (float)y; // Screen y-coordinate
+        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+        if (dist_sq > maskRadius * maskRadius) {
+            distances[y * width + x] = -1.0f;
+            return;
+        }
+    }
 
     // Mappa le coordinate dei pixel nello spazio matematico
     float centeredX = (float)x - width / 2.0f;
@@ -212,11 +234,22 @@ __global__ void integrate_hh(float* distances, int width, int height, float dt, 
 }
 
 // Kernel CUDA per il modello di Compteizione Intraspecifica
-__global__ void integrate_lvm(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float r1, float K1, float a12, float r2, float K2, float a21, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY) {
+__global__ void integrate_lvm(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float r1, float K1, float a12, float r2, float K2, float a21, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height) return;
+
+    // Applica la maschera per prima cosa
+    if (useMask) {
+        float pixel_x = (float)x; // Screen x-coordinate
+        float pixel_y = (float)y; // Screen y-coordinate
+        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+        if (dist_sq > maskRadius * maskRadius) {
+            distances[y * width + x] = -1.0f;
+            return;
+        }
+    }
 
     // Map pixel coordinates to the mathematical space
     float centeredX = (float)x - width / 2.0f;
@@ -291,11 +324,22 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
 }
 
 // Kernel CUDA per il modello Preda-Predatore
-__global__ void integrate_lv(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float a, float b, float c, float d, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY) {
+__global__ void integrate_lv(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float a, float b, float c, float d, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
     if (x >= width || y >= height) return;
+
+    // Applica la maschera per prima cosa
+    if (useMask) {
+        float pixel_x = (float)x; // Screen x-coordinate
+        float pixel_y = (float)y; // Screen y-coordinate
+        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+        if (dist_sq > maskRadius * maskRadius) {
+            distances[y * width + x] = -1.0f;
+            return;
+        }
+    }
 
     // Mappa le coordinate dei pixel nello spazio matematico
     float centeredX = (float)x - width / 2.0f;
@@ -370,21 +414,21 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
     distances[y * width + x] = finalLength / initialLength;
 }
 
-void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY) {
+void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
     dim3 blockDim(blockDimX, blockDimY);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
     switch (model) {
     case 3:
-        integrate_hh << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, Iext, bifurcation_type_id, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY);
+        integrate_hh << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, Iext, bifurcation_type_id, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
         break;
     case 0:
-        integrate_pn << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, L, gamma, g, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY);
+        integrate_pn << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, L, gamma, g, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
         break;
     case 2:
-        integrate_lvm << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, r1, K1, a12, r2, K2, a21, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY);
+        integrate_lvm << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, r1, K1, a12, r2, K2, a21, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
         break;
     case 1:
-        integrate_lv << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, a, b, c, d, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY);
+        integrate_lv << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, a, b, c, d, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
         break;
     }
     cudaDeviceSynchronize();
