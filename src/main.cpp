@@ -8,7 +8,6 @@
 #include <filesystem>
 #include <windows.h>
 #include <GL/GL.h>
-#include <algorithm> // Include for std::clamp
 #include <tchar.h>
 #include <cmath>
 #include <sstream>
@@ -159,9 +158,18 @@ static bool is_model_parameters_expanded = true;
 
 // Parametri per la maschera
 static bool g_useMask = false;
+static int g_maskType = 0; // 0: Circular, 1: Rectangular
 static float g_maskRadiusPercentage = 25.0f; // Radius in percentage
 
-extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius);
+// Rectangular mask parameters
+static bool g_useRectMaskSelection = false;
+static ImVec2 g_rectMaskStartPos;
+static ImVec2 g_rectMaskEndPos;
+static bool g_isRectMaskDragging = false;
+static bool g_isFirstRectMaskActivation = true; // Nuova variabile, inizializzata a true
+
+
+extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY);
 
 // Funzione CPU per la maschera (non più usata, la logica è in CUDA)
 bool mask_function(float x, float y) {
@@ -252,7 +260,7 @@ ImVec2 transform_coordinates(int x, int y, float scale_x, float scale_y)
 
 }
 
-void render_scalar_field(float* distances, bool useMask, float maskRadiusPixels) {
+void render_scalar_field(float* distances, bool useMask, int maskType, ImVec2 rectMaskStartPos, ImVec2 rectMaskEndPos, float maskRadiusPixels) {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, g_Width, g_Height, 0, -1, 1);
@@ -269,15 +277,32 @@ void render_scalar_field(float* distances, bool useMask, float maskRadiusPixels)
 
             // Check if the point is outside the mask *before* checking the distance value
             if (useMask) {
-                float dist_sq = (pixel_x - maskCenterXPixels) * (pixel_x - maskCenterXPixels) +
-                    (pixel_y - maskCenterYPixels) * (pixel_y - maskCenterYPixels);
-                if (dist_sq > maskRadiusPixels * maskRadiusPixels) {
-                    glColor3f(0.45f, 0.45f, 0.4f); // Dark gray
-                    glVertex2f(pixel_x, pixel_y);
-                    glVertex2f(pixel_x + 1.0f, pixel_y);
-                    glVertex2f(pixel_x + 1.0f, pixel_y + 1.0f);
-                    glVertex2f(pixel_x, pixel_y + 1.0f);
-                    continue; // Skip to the next pixel
+                if (maskType == 0) { // Circular Mask
+                    float dist_sq = (pixel_x - maskCenterXPixels) * (pixel_x - maskCenterXPixels) +
+                        (pixel_y - maskCenterYPixels) * (pixel_y - maskCenterYPixels);
+                    if (dist_sq > maskRadiusPixels * maskRadiusPixels) {
+                        glColor3f(0.45f, 0.45f, 0.4f); // Dark gray
+                        glVertex2f(pixel_x, pixel_y);
+                        glVertex2f(pixel_x + 1.0f, pixel_y);
+                        glVertex2f(pixel_x + 1.0f, pixel_y + 1.0f);
+                        glVertex2f(pixel_x, pixel_y + 1.0f);
+                        continue; // Skip to the next pixel
+                    }
+                }
+                else if (maskType == 1) { // Rectangular Mask
+                    float rectMinX = std::min(rectMaskStartPos.x, rectMaskEndPos.x);
+                    float rectMaxX = std::max(rectMaskStartPos.x, rectMaskEndPos.x);
+                    float rectMinY = std::min(rectMaskStartPos.y, rectMaskEndPos.y);
+                    float rectMaxY = std::max(rectMaskStartPos.y, rectMaskEndPos.y);
+
+                    if (pixel_x < rectMinX || pixel_x > rectMaxX || pixel_y < rectMinY || pixel_y > rectMaxY) {
+                        glColor3f(0.45f, 0.45f, 0.4f); // Dark gray
+                        glVertex2f(pixel_x, pixel_y);
+                        glVertex2f(pixel_x + 1.0f, pixel_y);
+                        glVertex2f(pixel_x + 1.0f, pixel_y + 1.0f);
+                        glVertex2f(pixel_x, pixel_y + 1.0f);
+                        continue;
+                    }
                 }
             }
 
@@ -445,7 +470,10 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskType = 0;
         g_maskRadiusPercentage = 25.0f;
+        g_useRectMaskSelection = false;
+        g_isRectMaskDragging = false;
         break;
     case 1: // Lotka-Volterra (Preda-Predatore)
         g_a = 0.66666f;
@@ -463,7 +491,10 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskType = 0;
         g_maskRadiusPercentage = 25.0f;
+        g_useRectMaskSelection = false;
+        g_isRectMaskDragging = false;
         break;
     case 2: // Modello Lotka Volterra (Competizione)
         g_r1 = 1.2f;
@@ -483,7 +514,10 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskType = 0;
         g_maskRadiusPercentage = 25.0f;
+        g_useRectMaskSelection = false;
+        g_isRectMaskDragging = false;
         break;
     case 3: // Modello di Hodgkin-Huxley
         g_I_ext = 0.0f;
@@ -499,7 +533,10 @@ void reset_parameters() {
         g_transform.offsetX = 0.0f;
         g_transform.offsetY = 0.0f;
         g_useMask = false; // Disable mask by default when resetting parameters
+        g_maskType = 0;
         g_maskRadiusPercentage = 25.0f;
+        g_useRectMaskSelection = false;
+        g_isRectMaskDragging = false;
         break;
     }
 }
@@ -992,7 +1029,7 @@ int main(int, char**)
         g_transform.offsetY += (center_world_after.y - center_world_before.y) * scale_y;
 
         // Gestisci il drag del mouse per spostare il campo scalare
-        if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) && !ImGui::IsAnyItemActive()) // Se il mouse è trascinato, non è sopra una finestra ImGui e non sta interagendo con un elemento
+        if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) && !ImGui::IsAnyItemActive() && (!g_useRectMaskSelection || !g_useMask)) // Se il mouse è trascinato, non è sopra una finestra ImGui e non sta interagendo con un elemento E (la selezione rettangolare NON è attiva OPPURE la maschera NON è in uso)
         {
             g_transform.offsetX -= ImGui::GetIO().MouseDelta.x;
             g_transform.offsetY -= ImGui::GetIO().MouseDelta.y;
@@ -1003,9 +1040,28 @@ int main(int, char**)
         float maskCenterYPixels = g_Height * 0.5f;
         float maskRadiusPixels = (g_maskRadiusPercentage / 100.0f) * (g_Width / 2.0f); // Radius as percentage of screen width
 
+        // Rectangular mask selection logic
+        if (g_useMask && g_useRectMaskSelection) { // Esegui la logica SOLO se sia g_useMask CHE g_useRectMaskSelection sono true
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) && !ImGui::IsAnyItemActive()) {
+                g_isRectMaskDragging = true;
+                g_rectMaskStartPos = ImGui::GetMousePos();
+                g_rectMaskEndPos = g_rectMaskStartPos; // Initialize end position
+            }
+            if (g_isRectMaskDragging) {
+                g_rectMaskEndPos = ImGui::GetMousePos();
+            }
+            if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && g_isRectMaskDragging) {
+                g_isRectMaskDragging = false;
+            }
+        }
+        else {
+            g_isRectMaskDragging = false; // Cancel dragging se la selezione rettangolare o la maschera principale sono disabilitate
+        }
+
+
         // Esegui l'integrazione con CUDA solo se nencessario
         if (!is_choosing) {
-            run_cuda_kernel(model, g_Width, g_Height, d_distances, g_dt, g_t, g_transform.offsetX, g_transform.offsetY, g_transform.zoom, g_x_stretch, g_y_stretch, g_I_ext, g_bif_ID, g_L, g_gamma, g_g, g_r1, g_K1, g_a12, g_r2, g_K2, g_a21, g_a, g_b, g_c, g_d, gpu_scale, g_numSides, g_blockDimX, g_blockDimY, g_useBoundingBox, g_boundingBoxMinX, g_boundingBoxMaxX, g_boundingBoxMinY, g_boundingBoxMaxY, g_useMask, maskCenterXPixels, maskCenterYPixels, maskRadiusPixels);
+            run_cuda_kernel(model, g_Width, g_Height, d_distances, g_dt, g_t, g_transform.offsetX, g_transform.offsetY, g_transform.zoom, g_x_stretch, g_y_stretch, g_I_ext, g_bif_ID, g_L, g_gamma, g_g, g_r1, g_K1, g_a12, g_r2, g_K2, g_a21, g_a, g_b, g_c, g_d, gpu_scale, g_numSides, g_blockDimX, g_blockDimY, g_useBoundingBox, g_boundingBoxMinX, g_boundingBoxMaxX, g_boundingBoxMinY, g_boundingBoxMaxY, g_useMask, g_maskType, maskCenterXPixels, maskCenterYPixels, maskRadiusPixels, g_rectMaskStartPos.x, g_rectMaskStartPos.y, g_rectMaskEndPos.x, g_rectMaskEndPos.y);
         }
         // Copia i dati dalla GPU alla CPU
         copy_distances_to_host(h_distances, d_distances, g_Width, g_Height);
@@ -1191,15 +1247,35 @@ int main(int, char**)
             g_blockDimY = g_blockDimX;
             ImGui::TreePop();
         }
-        if (ImGui::TreeNode("Dominio")) {
+        if (ImGui::TreeNode("Dominio e Maschera")) {
             ImGui::Checkbox("Utilizza Dominio", &g_useBoundingBox);
             if (g_useBoundingBox) {
                 ImGui::DragFloatRange2("X", &g_boundingBoxMinX, &g_boundingBoxMaxX, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::DragFloatRange2("Y", &g_boundingBoxMinY, &g_boundingBoxMaxY, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
             };
+            ImGui::Dummy(ImVec2(0, 2));
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0, 2));
             ImGui::Checkbox("Utilizza Maschera", &g_useMask);
             if (g_useMask) {
-                ImGui::SliderFloat("Raggio (%)", &g_maskRadiusPercentage, 0.0f, 100.0f, "%.1f%%"); // Radius in percentage
+                const char* maskTypeNames[] = { "Circolare", "Rettangolare" };
+                if (ImGui::Combo("Tipo Maschera", &g_maskType, maskTypeNames, IM_ARRAYSIZE(maskTypeNames))) {
+                    if (g_maskType == 1) { // Se si passa a maschera rettangolare
+                        g_useRectMaskSelection = true; // Attiva automaticamente la selezione rettangolare
+                        if (g_isFirstRectMaskActivation) {
+                            // Imposta la maschera rettangolare predefinita (solo la prima volta)
+                            g_rectMaskStartPos = ImVec2((g_Width - 200) / 2.0f, (g_Height - 150) / 2.0f);
+                            g_rectMaskEndPos = ImVec2(g_rectMaskStartPos.x + 200, g_rectMaskStartPos.y + 150);
+                            g_isFirstRectMaskActivation = false;
+                        }
+                    }
+                }
+                if (g_maskType == 0) {
+                    ImGui::SliderFloat("Raggio (%)", &g_maskRadiusPercentage, 0.0f, 100.0f, "%.1f%%"); // Radius in percentage
+                }
+                else if (g_maskType == 1) {
+                    ImGui::Checkbox("Seleziona Maschera Rettangolare", &g_useRectMaskSelection);
+                }
             }
             ImGui::TreePop();
         }
@@ -1259,6 +1335,7 @@ int main(int, char**)
             g_blockDimX = 5;
             g_blockDimY = 5;
             g_useMask = false;
+            g_maskType = 0;
         }
         ImGui::SetItemTooltip("Reimposta lo zoom e la tralsazione.", ImGui::GetStyle().HoverDelayNormal);
 
@@ -1335,12 +1412,22 @@ int main(int, char**)
         ImGui::PopFont();
 
         // Draw mask overlay if enabled
-        if (g_useMask) {
+        if (g_useMask && g_maskType == 0) { // Circular mask overlay
             ImDrawList* bg_draw_list = ImGui::GetBackgroundDrawList(); // Get background draw list
             ImVec2 center = ImVec2(maskCenterXPixels, maskCenterYPixels);
             float radius = maskRadiusPixels;
             bg_draw_list->AddCircle(center, radius, ImColor(255, 255, 255, 255), 0, 2.5f); // Fully opaque white outline, thicker
         }
+        if (g_useMask && g_maskType == 1 && g_isRectMaskDragging) { // Rectangular mask overlay during dragging
+            ImDrawList* draw_list = ImGui::GetForegroundDrawList(); // Use foreground to draw over everything
+            draw_list->AddRectFilled(g_rectMaskStartPos, g_rectMaskEndPos, ImColor(255, 255, 255, 30)); // Semi-transparent white
+            draw_list->AddRect(g_rectMaskStartPos, g_rectMaskEndPos, ImColor(255, 255, 255)); // White outline
+        }
+        else if (g_useMask && g_maskType == 1 && !g_isRectMaskDragging && g_rectMaskStartPos.x != g_rectMaskEndPos.x && g_rectMaskStartPos.y != g_rectMaskEndPos.y) { // Rectangular mask overlay after selection
+            ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
+            draw_list->AddRect(g_rectMaskStartPos, g_rectMaskEndPos, ImColor(255, 255, 255), 0.0f, 0, 2.5f); // White outline after selection
+        }
+
 
         ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
         ImVec2 origin_screen = ImVec2(g_Width / 2.0f - g_transform.offsetX, g_Height / 2.0f - g_transform.offsetY);
@@ -1349,7 +1436,7 @@ int main(int, char**)
         glViewport(0, 0, g_Width, g_Height);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        render_scalar_field(h_distances, g_useMask, maskRadiusPixels); // Pass mask parameters
+        render_scalar_field(h_distances, g_useMask, g_maskType, g_rectMaskStartPos, g_rectMaskEndPos, maskRadiusPixels); // Pass mask parameters
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
         {
