@@ -1260,7 +1260,10 @@ int main(int, char**)
             if (g_useMask) {
                 const char* maskTypeNames[] = { "Circolare", "Rettangolare" };
                 if (ImGui::Combo("Tipo Maschera", &g_maskType, maskTypeNames, IM_ARRAYSIZE(maskTypeNames))) {
-                    if (g_maskType == 1) { // Se si passa a maschera rettangolare
+                    if (g_maskType == 0) {
+                        g_useRectMaskSelection = false;
+                    }
+                    else if (g_maskType == 1) { // Se si passa a maschera rettangolare
                         g_useRectMaskSelection = true; // Attiva automaticamente la selezione rettangolare
                         if (g_isFirstRectMaskActivation) {
                             // Imposta la maschera rettangolare predefinita (solo la prima volta)
