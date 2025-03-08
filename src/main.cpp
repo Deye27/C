@@ -168,6 +168,12 @@ static ImVec2 g_rectMaskEndPos;
 static bool g_isRectMaskDragging = false;
 static bool g_isFirstRectMaskActivation = true; // Nuova variabile, inizializzata a true
 
+// Popup
+static bool g_showRectMaskPopup = false;
+static double g_rectMaskPopupStartTime = 0.0;
+static const double g_rectMaskPopupDuration = 3.0; // Durata del popup in secondi
+static ImVec4 g_rectMaskPopupColor = ImVec4(0.0f, 0.1f, 0.0f, 0.5f); // Colore iniziale (verde semitrasparente)
+
 
 extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY);
 
@@ -177,6 +183,134 @@ bool mask_function(float x, float y) {
     float centerY = 0.0f;
     float radius = 1.5f;
     return (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY) <= radius * radius;
+}
+
+bool isInsideMask(float x, float y, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, ImVec2 rectMaskStart, ImVec2 rectMaskEnd) {
+    if (!useMask) {
+        return true; // Se la maschera non è attiva, tutto è "dentro"
+    }
+
+    if (maskType == 0) { // Maschera Circolare
+        float dist_sq = (x - maskCenterX) * (x - maskCenterX) + (y - maskCenterY) * (y - maskCenterY);
+        return dist_sq <= maskRadius * maskRadius;
+    }
+    else if (maskType == 1) { // Maschera Rettangolare
+        float rectMinX = std::min(rectMaskStart.x, rectMaskEnd.x);
+        float rectMaxX = std::max(rectMaskStart.x, rectMaskEnd.x);
+        float rectMinY = std::min(rectMaskStart.y, rectMaskEnd.y);
+        float rectMaxY = std::max(rectMaskStart.y, rectMaskEnd.y);
+        return (x >= rectMinX && x <= rectMaxX && y >= rectMinY && y <= rectMaxY);
+    }
+
+    return true; // Caso di default (non dovrebbe mai accadere, ma è buona pratica)
+}
+
+void drawRectMaskPopup() {
+    if (g_showRectMaskPopup) {
+        double currentTime = ImGui::GetTime();
+        if (currentTime - g_rectMaskPopupStartTime < g_rectMaskPopupDuration) {
+            ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+
+            ImVec2 window_pos = ImGui::GetMainViewport()->Pos;
+            ImVec2 window_size = ImGui::GetMainViewport()->Size;
+
+            // Testo del popup (dinamico)
+            const char* popup_text = g_useRectMaskSelection ? "Selezione maschera rettangolare attiva" : "Selezione maschera rettangolare disattiva";
+            ImVec2 text_size = ImGui::CalcTextSize(popup_text);
+
+            // Calcola la larghezza del popup in base al testo + padding
+            float padding = 10.0f; // Padding orizzontale
+            ImVec2 popup_size = ImVec2(text_size.x + 2.0f * padding, text_size.y + 2.0f * padding);
+
+            // Posiziona il popup in basso al centro
+            ImVec2 popup_pos_min = ImVec2(window_pos.x + (window_size.x - popup_size.x) / 2.0f, window_pos.y + window_size.y - popup_size.y - padding); // padding anche in basso
+            ImVec2 popup_pos_max = ImVec2(popup_pos_min.x + popup_size.x, popup_pos_min.y + popup_size.y);
+
+            // Colore del bordo (stesso colore del bg, ma opaco)
+            ImU32 border_color = ImGui::ColorConvertFloat4ToU32(ImVec4(g_rectMaskPopupColor.x / g_rectMaskPopupColor.x * 0.8f, g_rectMaskPopupColor.y/ g_rectMaskPopupColor.y * 0.8f, g_rectMaskPopupColor.z, 1.0f));
+
+            draw_list->AddRectFilled(popup_pos_min, popup_pos_max, ImGui::ColorConvertFloat4ToU32(g_rectMaskPopupColor), 5.0f); // Sfondo arrotondato
+            draw_list->AddRect(popup_pos_min, popup_pos_max, border_color, 5.0f, 0, 2.0f); // Bordo arrotondato e opaco
+
+            // Posiziona il testo al centro del popup
+            ImVec2 text_pos = ImVec2(popup_pos_min.x + padding, popup_pos_min.y + padding);
+            draw_list->AddText(text_pos, IM_COL32_WHITE, popup_text);
+        }
+        else {
+            g_showRectMaskPopup = false;
+        }
+    }
+}
+
+void drawContour(ImDrawList* draw_list, ImVec2 min_world, ImVec2 max_world, float scale_x, float scale_y, float offset_x, float offset_y, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, ImVec2 rectMaskStart, ImVec2 rectMaskEnd, float thickness = 1.0f)
+{
+    // Trasforma le coordinate del mondo in coordinate dello schermo *correttamente*
+    ImVec2 min_screen = ImVec2(
+        (min_world.x * scale_x) + g_Width / 2.0f + offset_x,
+        (-max_world.y * scale_y) + g_Height / 2.0f + offset_y
+    );
+    ImVec2 max_screen = ImVec2(
+        (max_world.x * scale_x) + g_Width / 2.0f + offset_x,
+        (-min_world.y * scale_y) + g_Height / 2.0f + offset_y
+    );
+
+    int dashLength = 6; // Lunghezza del trattino
+    int gapLength = 8;  // Lunghezza dello spazio
+
+    // Funzione per disegnare un singolo pixel (per il tratteggio)
+    auto drawPixel = [&](float x, float y, ImU32 color) {
+        draw_list->AddLine(ImVec2(x, y), ImVec2(x + 1, y + 1), color, thickness); // Disegna un piccolo quadrato 1x1
+        };
+
+    // --- Disegna il contorno tratteggiato SOLO FUORI dalla maschera ---
+    int counter = 0;
+    // Lato superiore
+    for (float x = min_screen.x; x <= max_screen.x; ++x) {
+        if (counter < dashLength) {
+            if (!isInsideMask(x, min_screen.y, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStart, rectMaskEnd)) {
+                drawPixel(x, min_screen.y, ImColor(0, 0, 0, 128)); // Tratteggio semitrasparente solo se FUORI maschera
+            }
+        }
+        counter = (counter + 1) % (dashLength + gapLength);
+    }
+
+    // Lato destro
+    counter = 0;
+    for (float y = min_screen.y; y <= max_screen.y; ++y)
+    {
+        if (counter < dashLength)
+        {
+            if (!isInsideMask(max_screen.x, y, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStart, rectMaskEnd)) {
+                drawPixel(max_screen.x, y, ImColor(0, 0, 0, 128)); // Tratteggio semitrasparente solo se FUORI maschera
+            }
+        }
+        counter = (counter + 1) % (dashLength + gapLength);
+    }
+
+    // Lato inferiore
+    counter = 0;
+    for (float x = max_screen.x; x >= min_screen.x; --x)
+    {
+        if (counter < dashLength)
+        {
+            if (!isInsideMask(x, max_screen.y, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStart, rectMaskEnd)) {
+                drawPixel(x, max_screen.y, ImColor(0, 0, 0, 128)); // Tratteggio semitrasparente solo se FUORI maschera
+            }
+        }
+        counter = (counter + 1) % (dashLength + gapLength);
+    }
+    // Lato sinistro
+    counter = 0;
+    for (float y = max_screen.y; y >= min_screen.y; --y)
+    {
+        if (counter < dashLength)
+        {
+            if (!isInsideMask(min_screen.x, y, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStart, rectMaskEnd)) {
+                drawPixel(min_screen.x, y, ImColor(0, 0, 0, 128)); // Tratteggio semitrasparente solo se FUORI maschera
+            }
+        }
+        counter = (counter + 1) % (dashLength + gapLength);
+    }
 }
 
 // Funzioni di gestione CUDA
@@ -1264,7 +1398,7 @@ int main(int, char**)
                         g_useRectMaskSelection = false;
                     }
                     else if (g_maskType == 1) { // Se si passa a maschera rettangolare
-                        g_useRectMaskSelection = true; // Attiva automaticamente la selezione rettangolare
+                        g_useRectMaskSelection = false;
                         if (g_isFirstRectMaskActivation) {
                             // Imposta la maschera rettangolare predefinita (solo la prima volta)
                             g_rectMaskStartPos = ImVec2((g_Width - 200) / 2.0f, (g_Height - 150) / 2.0f);
@@ -1277,9 +1411,14 @@ int main(int, char**)
                     ImGui::SliderFloat("Raggio (%)", &g_maskRadiusPercentage, 0.0f, 100.0f, "%.1f%%"); // Radius in percentage
                 }
                 else if (g_maskType == 1) {
-                    ImGui::Checkbox("Seleziona Maschera Rettangolare", &g_useRectMaskSelection);
+                    ImGui::Dummy(ImVec2(0, 3));
+                    ImGui::Text("Premere 'M' e trascinare per selezionare la maschera");
                 }
+                //else if (g_maskType == 1) {
+                //    ImGui::Checkbox("Seleziona Maschera Rettangolare", &g_useRectMaskSelection);
+                //}
             }
+            ImGui::Dummy(ImVec2(0, 3));
             ImGui::TreePop();
         }
 
@@ -1386,33 +1525,24 @@ int main(int, char**)
         float vertical_length = top_left.y - bottom_right.y;
         PrecisionXY precision = calculate_precision(horizontal_length, vertical_length);
 
-        std::stringstream ss;
-        if (z_value != -1.0f && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-            ImGui::PushFont(latex);
-            ss << "C(" << std::fixed << std::setprecision(1) << g_t << ", " << format_number(mouse_mapped.x, precision, true) << ", " << format_number(mouse_mapped.y, precision, false) << ") = " << std::fixed << std::setprecision(5) << z_value;
-            std::string text = ss.str();
-            ImVec2 textSize = ImGui::CalcTextSize(text.c_str());
-            ImVec2 textPos = ImVec2(mouse_pos.x, mouse_pos.y - 20);
-            ImVec2 boxPadding = ImVec2(5.0f, 3.0f);
-            float boxRounding = 5.0f; // Raggio desiderato (anche se non sarà un vero arrotondamento)
-
-            ImVec2 boxMin = ImVec2(textPos.x - boxPadding.x, textPos.y - boxPadding.y);
-            ImVec2 boxMax = ImVec2(textPos.x + textSize.x + boxPadding.x, textPos.y + textSize.y + boxPadding.y);
-
-            ImGui::GetBackgroundDrawList()->AddRectFilled(boxMin, boxMax, ImColor(40, 40, 40, 230), boxRounding, ImDrawFlags_RoundCornersAll);
-
-            ImGui::GetBackgroundDrawList()->AddText(textPos, IM_COL32_WHITE, text.c_str());
-            ImGui::PopFont();
-        }
-
         // Versione
         if (g_Width > 0 && g_Height > 0)
         {
             ImGui::PushFont(thin);
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.1.2-beta");
+            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.2.0-beta");
             ImGui::PopFont();
         }
         ImGui::PopFont();
+
+        // Gestione pressione tasto M per attivare/disattivare la maschera rettangolare
+        if (ImGui::IsKeyPressed(ImGuiKey_M) && g_useMask) { // Controlla se è stato premuto il tasto 'M' e che la maschera sia abilitata
+            if (g_maskType == 1) {
+                g_useRectMaskSelection = !g_useRectMaskSelection; // Inverti lo stato di attivazione
+                g_showRectMaskPopup = true; // Mostra il pop-up
+                g_rectMaskPopupStartTime = ImGui::GetTime(); // Registra il tempo di attivazione
+                g_rectMaskPopupColor = g_useRectMaskSelection ? ImVec4(0.0f, 0.4f, 0.0f, 0.8f) : ImVec4(0.4f, 0.0f, 0.0f, 0.8f); // Imposta il colore (verde/rosso)
+            }
+        }
 
         // Draw mask overlay if enabled
         if (g_useMask && g_maskType == 0) { // Circular mask overlay
@@ -1434,7 +1564,41 @@ int main(int, char**)
 
         ImDrawList* draw_list = ImGui::GetBackgroundDrawList();
         ImVec2 origin_screen = ImVec2(g_Width / 2.0f - g_transform.offsetX, g_Height / 2.0f - g_transform.offsetY);
-        draw_list->AddCircleFilled(origin_screen, 3.0f, IM_COL32_BLACK);
+
+        if (g_useBoundingBox) {
+            ImVec2 bb_min_world = ImVec2(g_boundingBoxMinX, g_boundingBoxMinY);
+            ImVec2 bb_max_world = ImVec2(g_boundingBoxMaxX, g_boundingBoxMaxY);
+
+            drawContour(draw_list, bb_min_world, bb_max_world, scale_x, scale_y, -g_transform.offsetX, -g_transform.offsetY, g_useMask, g_maskType, maskCenterXPixels, maskCenterYPixels, maskRadiusPixels, g_rectMaskStartPos, g_rectMaskEndPos);
+        }
+
+        if (isInsideMask(origin_screen.x, origin_screen.y, g_useMask, g_maskType, maskCenterXPixels, maskCenterYPixels, maskRadiusPixels, g_rectMaskStartPos, g_rectMaskEndPos)) {
+            draw_list->AddCircleFilled(origin_screen, 3.0f, IM_COL32_BLACK);
+        }
+        else {
+            draw_list->AddCircleFilled(origin_screen, 3.0f, ImColor(0, 0, 0, 128)); // Semitrasparente
+        }
+
+        std::stringstream ss;
+        if (z_value != -1.0f && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+            ImGui::PushFont(latex);
+            ss << "C(" << std::fixed << std::setprecision(1) << g_t << ", " << format_number(mouse_mapped.x, precision, true) << ", " << format_number(mouse_mapped.y, precision, false) << ") = " << std::fixed << std::setprecision(5) << z_value;
+            std::string text = ss.str();
+            ImVec2 textSize = ImGui::CalcTextSize(text.c_str());
+            ImVec2 textPos = ImVec2(mouse_pos.x, mouse_pos.y - 20);
+            ImVec2 boxPadding = ImVec2(5.0f, 3.0f);
+            float boxRounding = 5.0f; // Raggio desiderato (anche se non sarà un vero arrotondamento)
+
+            ImVec2 boxMin = ImVec2(textPos.x - boxPadding.x, textPos.y - boxPadding.y);
+            ImVec2 boxMax = ImVec2(textPos.x + textSize.x + boxPadding.x, textPos.y + textSize.y + boxPadding.y);
+
+            ImGui::GetBackgroundDrawList()->AddRectFilled(boxMin, boxMax, ImColor(40, 40, 40, 230), boxRounding, ImDrawFlags_RoundCornersAll);
+
+            ImGui::GetBackgroundDrawList()->AddText(textPos, IM_COL32_WHITE, text.c_str());
+            ImGui::PopFont();
+        }
+
+        drawRectMaskPopup();
         ImGui::Render();
         glViewport(0, 0, g_Width, g_Height);
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
