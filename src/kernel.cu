@@ -36,7 +36,7 @@ __device__ float sigmoid_gpu(float x) {
 }
 
 // Kernel CUDA per il modello di Pendulum
-__global__ void integrate_pn(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float L, float gamma, float g, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
+__global__ void integrate_pn(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float L, float gamma, float g, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -44,12 +44,28 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
 
     // Applica la maschera per prima cosa
     if (useMask) {
-        float pixel_x = (float)x; // Screen x-coordinate
-        float pixel_y = (float)y; // Screen y-coordinate
-        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
-        if (dist_sq > maskRadius * maskRadius) {
-            distances[y * width + x] = -1.0f;
-            return;
+        if (maskType == 0) { // Circular Mask
+            float pixel_x = (float)x; // Screen x-coordinate
+            float pixel_y = (float)y; // Screen y-coordinate
+            float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+            if (dist_sq > maskRadius * maskRadius) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
+        }
+        else if (maskType == 1) { // Rectangular Mask
+            float rectMinX = ::min(rectMaskStartX, rectMaskEndX);
+            float rectMaxX = max(rectMaskStartX, rectMaskEndX);
+            float rectMinY = min(rectMaskStartY, rectMaskEndY);
+            float rectMaxY = max(rectMaskStartY, rectMaskEndY);
+
+            float pixel_x = (float)x;
+            float pixel_y = (float)y;
+
+            if (pixel_x < rectMinX || pixel_x > rectMaxX || pixel_y < rectMinY || pixel_y > rectMaxY) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
         }
     }
 
@@ -84,13 +100,13 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
     if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integra i punti del poligono nel sistema dinamico
-        float x_current, y_current, x_next, y_next;
+        float theta_current, omega_current, theta_next, omega_next; // Corrected variable declarations
 
         int num_steps = (int)round(t_max / dt);
         for (int i = 0; i < numSides; i++) {
             // Usa una variabile temporanea per l'angolo iniziale
-            float theta_current = pointsX[i]; // Inizializza con x
-            float omega_current = pointsY[i]; // Inizializza con y
+            theta_current = pointsX[i]; // Inizializza con x
+            omega_current = pointsY[i]; // Inizializza con y
 
             for (int step = 0; step < num_steps; step++) {
                 // Equations of the pendulum
@@ -98,8 +114,8 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
                 float dtheta = omega_current;
 
                 // Calcola le posizioni successive
-                float omega_next = omega_current + domega * dt;
-                float theta_next = theta_current + dtheta * dt;
+                omega_next = omega_current + domega * dt;
+                theta_next = theta_current + dtheta * dt;
 
                 // Aggiorna le variabili temporanee con i nuovi valori
                 theta_current = theta_next;
@@ -118,7 +134,7 @@ __global__ void integrate_pn(float* distances, int width, int height, float dt, 
 }
 
 // Kernel CUDA per il modello di Hodgkin-Huxley
-__global__ void integrate_hh(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
+__global__ void integrate_hh(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -126,12 +142,28 @@ __global__ void integrate_hh(float* distances, int width, int height, float dt, 
 
     // Applica la maschera per prima cosa
     if (useMask) {
-        float pixel_x = (float)x; // Screen x-coordinate
-        float pixel_y = (float)y; // Screen y-coordinate
-        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
-        if (dist_sq > maskRadius * maskRadius) {
-            distances[y * width + x] = -1.0f;
-            return;
+        if (maskType == 0) { // Circular Mask
+            float pixel_x = (float)x; // Screen x-coordinate
+            float pixel_y = (float)y; // Screen y-coordinate
+            float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+            if (dist_sq > maskRadius * maskRadius) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
+        }
+        else if (maskType == 1) { // Rectangular Mask
+            float rectMinX = min(rectMaskStartX, rectMaskEndX);
+            float rectMaxX = max(rectMaskStartX, rectMaskEndX);
+            float rectMinY = min(rectMaskStartY, rectMaskEndY);
+            float rectMaxY = max(rectMaskStartY, rectMaskEndY);
+
+            float pixel_x = (float)x;
+            float pixel_y = (float)y;
+
+            if (pixel_x < rectMinX || pixel_x > rectMaxX || pixel_y < rectMinY || pixel_y > rectMaxY) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
         }
     }
 
@@ -234,7 +266,7 @@ __global__ void integrate_hh(float* distances, int width, int height, float dt, 
 }
 
 // Kernel CUDA per il modello di Compteizione Intraspecifica
-__global__ void integrate_lvm(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float r1, float K1, float a12, float r2, float K2, float a21, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
+__global__ void integrate_lvm(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float r1, float K1, float a12, float r2, float K2, float a21, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -242,12 +274,28 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
 
     // Applica la maschera per prima cosa
     if (useMask) {
-        float pixel_x = (float)x; // Screen x-coordinate
-        float pixel_y = (float)y; // Screen y-coordinate
-        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
-        if (dist_sq > maskRadius * maskRadius) {
-            distances[y * width + x] = -1.0f;
-            return;
+        if (maskType == 0) { // Circular Mask
+            float pixel_x = (float)x; // Screen x-coordinate
+            float pixel_y = (float)y; // Screen y-coordinate
+            float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+            if (dist_sq > maskRadius * maskRadius) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
+        }
+        else if (maskType == 1) { // Rectangular Mask
+            float rectMinX = min(rectMaskStartX, rectMaskEndX);
+            float rectMaxX = max(rectMaskStartX, rectMaskEndX);
+            float rectMinY = min(rectMaskStartY, rectMaskEndY);
+            float rectMaxY = max(rectMaskStartY, rectMaskEndY);
+
+            float pixel_x = (float)x;
+            float pixel_y = (float)y;
+
+            if (pixel_x < rectMinX || pixel_x > rectMaxX || pixel_y < rectMinY || pixel_y > rectMaxY) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
         }
     }
 
@@ -324,7 +372,7 @@ __global__ void integrate_lvm(float* distances, int width, int height, float dt,
 }
 
 // Kernel CUDA per il modello Preda-Predatore
-__global__ void integrate_lv(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float a, float b, float c, float d, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
+__global__ void integrate_lv(float* distances, int width, int height, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float a, float b, float c, float d, float scale, int numSides, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
 
@@ -332,12 +380,28 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
 
     // Applica la maschera per prima cosa
     if (useMask) {
-        float pixel_x = (float)x; // Screen x-coordinate
-        float pixel_y = (float)y; // Screen y-coordinate
-        float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
-        if (dist_sq > maskRadius * maskRadius) {
-            distances[y * width + x] = -1.0f;
-            return;
+        if (maskType == 0) { // Circular Mask
+            float pixel_x = (float)x; // Screen x-coordinate
+            float pixel_y = (float)y; // Screen y-coordinate
+            float dist_sq = (pixel_x - maskCenterX) * (pixel_x - maskCenterX) + (pixel_y - maskCenterY) * (pixel_y - maskCenterY);
+            if (dist_sq > maskRadius * maskRadius) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
+        }
+        else if (maskType == 1) { // Rectangular Mask
+            float rectMinX = min(rectMaskStartX, rectMaskEndX);
+            float rectMaxX = max(rectMaskStartX, rectMaskEndX);
+            float rectMinY = min(rectMaskStartY, rectMaskEndY);
+            float rectMaxY = max(rectMaskStartY, rectMaskEndY);
+
+            float pixel_x = (float)x;
+            float pixel_y = (float)y;
+
+            if (pixel_x < rectMinX || pixel_x > rectMaxX || pixel_y < rectMinY || pixel_y > rectMaxY) {
+                distances[y * width + x] = -1.0f;
+                return;
+            }
         }
     }
 
@@ -372,37 +436,37 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
     if (dt > 1e-9f && t_max > 1e-9f) // Using a small epsilon
     {
         // Integra i punti del poligono nel sistema dinamico
-        float x_current, y_current, x_next, y_next;
+        float x_current_loop, y_current_loop, x_next_loop, y_next_loop; // Corrected variable declarations
 
         int num_steps = (int)round(t_max / dt);
         for (int i = 0; i < numSides; i++) {
             // Usa variabili temporanee per i valori iniziali
-            float x_current = pointsX[i]; // Inizializza con x (preda)
-            float y_current = pointsY[i]; // Inizializza con y (predatore)
+            x_current_loop = pointsX[i]; // Inizializza con x (preda)
+            y_current_loop = pointsY[i]; // Inizializza con y (predatore)
 
             for (int step = 0; step < num_steps; step++) {
                 // Lotka-Volterra preda-predatore equations
-                float dx = a * x_current - b * x_current * y_current;
-                float dy = c * x_current * y_current - d * y_current;
+                float dx = a * x_current_loop - b * x_current_loop * y_current_loop;
+                float dy = c * x_current_loop * y_current_loop - d * y_current_loop;
 
                 // Calcola le posizioni successive
-                x_next = x_current + dx * dt;
-                y_next = y_current + dy * dt;
+                x_next_loop = x_current_loop + dx * dt;
+                y_next_loop = y_current_loop + dy * dt;
 
                 // Impedisci che le popolazioni diventino negative
-                if (x_next < 0) {
-                    x_next = 0;
+                if (x_next_loop < 0) {
+                    x_next_loop = 0;
                 }
-                if (y_next < 0) {
-                    y_next = 0;
+                if (y_next_loop < 0) {
+                    y_next_loop = 0;
                 }
 
                 // Aggiorna le variabili temporanee con i nuovi valori
-                x_current = x_next;
-                y_current = y_next;
+                x_current_loop = x_next_loop;
+                y_current_loop = y_next_loop;
             }
-            pointsX[i] = x_current; // Salva il valore x finale (preda)
-            pointsY[i] = y_current; // Salva il valore y finale (predatore)
+            pointsX[i] = x_current_loop; // Salva il valore x finale (preda)
+            pointsY[i] = y_current_loop; // Salva il valore y finale (predatore)
         }
         // Calcola la lunghezza del poligono deformato (c')
         finalLength = calculate_polyline_length(pointsX, pointsY, numSides);
@@ -414,21 +478,21 @@ __global__ void integrate_lv(float* distances, int width, int height, float dt, 
     distances[y * width + x] = finalLength / initialLength;
 }
 
-void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, float maskCenterX, float maskCenterY, float maskRadius) {
+void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY) {
     dim3 blockDim(blockDimX, blockDimY);
     dim3 gridDim((width + blockDim.x - 1) / blockDim.x, (height + blockDim.y - 1) / blockDim.y);
     switch (model) {
     case 3:
-        integrate_hh << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, Iext, bifurcation_type_id, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
+        integrate_hh << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, Iext, bifurcation_type_id, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStartX, rectMaskStartY, rectMaskEndX, rectMaskEndY);
         break;
     case 0:
-        integrate_pn << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, L, gamma, g, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
+        integrate_pn << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, L, gamma, g, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStartX, rectMaskStartY, rectMaskEndX, rectMaskEndY);
         break;
     case 2:
-        integrate_lvm << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, r1, K1, a12, r2, K2, a21, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
+        integrate_lvm << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, r1, K1, a12, r2, K2, a21, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStartX, rectMaskStartY, rectMaskEndX, rectMaskEndY);
         break;
     case 1:
-        integrate_lv << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, a, b, c, d, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskCenterX, maskCenterY, maskRadius);
+        integrate_lv << <gridDim, blockDim >> > (d_distances, width, height, dt, t_max, offsetX, offsetY, zoom, x_stretch, y_stretch, a, b, c, d, scale, numSides, useBoundingBox, boundingBoxMinX, boundingBoxMaxX, boundingBoxMinY, boundingBoxMaxY, useMask, maskType, maskCenterX, maskCenterY, maskRadius, rectMaskStartX, rectMaskStartY, rectMaskEndX, rectMaskEndY);
         break;
     }
     cudaDeviceSynchronize();
