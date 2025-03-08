@@ -209,6 +209,7 @@ void drawRectMaskPopup() {
     if (g_showRectMaskPopup) {
         double currentTime = ImGui::GetTime();
         if (currentTime - g_rectMaskPopupStartTime < g_rectMaskPopupDuration) {
+            ImGui::PushFont(bold);
             ImDrawList* draw_list = ImGui::GetForegroundDrawList();
 
             ImVec2 window_pos = ImGui::GetMainViewport()->Pos;
@@ -235,6 +236,7 @@ void drawRectMaskPopup() {
             // Posiziona il testo al centro del popup
             ImVec2 text_pos = ImVec2(popup_pos_min.x + padding, popup_pos_min.y + padding);
             draw_list->AddText(text_pos, IM_COL32_WHITE, popup_text);
+            ImGui::PopFont();
         }
         else {
             g_showRectMaskPopup = false;
@@ -824,7 +826,7 @@ static void choose_model(bool* p_open)
             ImGui::EndChild();
         }
         ImGui::SameLine();
-
+         
         // Right
         {
             float static_width = std::max(400.0f, 100 + ImGui::CalcTextSize(("Sistema Dinamico: " + std::string(modelNames[selected_model])).c_str()).x);
@@ -1218,7 +1220,7 @@ int main(int, char**)
         }
 
         ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(450, 800));
-        ImGui::Begin("Parametri del Modello", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+        ImGui::Begin("Pannello di Controllo", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
         ImGui::PopFont();
         const char* bifNames[] = {
             "Saddle-node",
@@ -1231,6 +1233,7 @@ int main(int, char**)
             is_choosing = true;
             is_model_parameters_expanded = false;
         }
+        ImGui::SetItemTooltip("Apre il menu con l'elenco dei modelli\ndisponibili e le relative descrizioni.", ImGui::GetStyle().HoverDelayNormal);
 
         if (is_choosing) {
             choose_model(&is_choosing);
@@ -1353,22 +1356,28 @@ int main(int, char**)
 
         if (ImGui::TreeNode("Impostazioni della Simulazione")) {
             ImGui::Checkbox("Usa # iterazioni", &use_iteration);
+            HelpMarker("Se attivo, il passo di integrazione è determinato\n in funione del numero delle iterazioni.");
             if (use_iteration) {
                 ImGui::DragInt("Iterazioni", &g_iterations, 0.5, 1);
+                ImGui::SetItemTooltip("Iterazioni totali.", ImGui::GetStyle().HoverDelayNormal);
                 if (g_iterations < 1) {
                     g_iterations = 1;
                 }
             }
             else {
                 ImGui::SliderFloat("dt", &g_dt_slider, 0.0f, 1.0f);
+                ImGui::SetItemTooltip("Passo di integrazione.", ImGui::GetStyle().HoverDelayNormal);
             }
             ImGui::InputFloat("T Max", &g_t_max, 0.0f, 0.0f, "%.1f");
+            ImGui::SetItemTooltip("Valore massimo per lo slider successivo.", ImGui::GetStyle().HoverDelayNormal);
             g_dt = g_t / g_iterations;
             ImGui::SliderFloat("T", &g_t, 0.0f, g_t_max);
+            ImGui::SetItemTooltip("Tempo per il quale viene valutato l'operator di stabilità.", ImGui::GetStyle().HoverDelayNormal);
             if (g_t < 0) {
-                ;                g_t = 0;
+                g_t = 0;
             }
             ImGui::SliderInt("Numero Vertici", &g_numSides, 3, 50);
+            ImGui::SetItemTooltip("Numero dei vertici che approssimano la circonferenza.", ImGui::GetStyle().HoverDelayNormal);
             ImGui::Dummy(ImVec2(0, 3));
             ImGui::Separator();
             ImGui::Dummy(ImVec2(0, 3));
@@ -1383,6 +1392,7 @@ int main(int, char**)
         }
         if (ImGui::TreeNode("Dominio e Maschera")) {
             ImGui::Checkbox("Utilizza Dominio", &g_useBoundingBox);
+            HelpMarker("Mostra il campo scalare solo\n in una regione del modello.");
             if (g_useBoundingBox) {
                 ImGui::DragFloatRange2("X", &g_boundingBoxMinX, &g_boundingBoxMaxX, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
                 ImGui::DragFloatRange2("Y", &g_boundingBoxMinY, &g_boundingBoxMaxY, 0.1f, -50000, 50000, "Min: %.1f%", "Max: %.1f%", ImGuiSliderFlags_AlwaysClamp);
@@ -1391,6 +1401,7 @@ int main(int, char**)
             ImGui::Separator();
             ImGui::Dummy(ImVec2(0, 2));
             ImGui::Checkbox("Utilizza Maschera", &g_useMask);
+            HelpMarker("Mostra il campo scalare solo\n in una regione dello schermo.");
             if (g_useMask) {
                 const char* maskTypeNames[] = { "Circolare", "Rettangolare" };
                 if (ImGui::Combo("Tipo Maschera", &g_maskType, maskTypeNames, IM_ARRAYSIZE(maskTypeNames))) {
@@ -1412,11 +1423,9 @@ int main(int, char**)
                 }
                 else if (g_maskType == 1) {
                     ImGui::Dummy(ImVec2(0, 3));
-                    ImGui::Text("Premere 'M' e trascinare per selezionare la maschera");
+                    const char* advice_text = g_useRectMaskSelection ? "Premere 'M' per disattivare la selezione della maschera." : "Premere 'M' per attivare la selezione della maschera.";
+                    ImGui::Text(advice_text);
                 }
-                //else if (g_maskType == 1) {
-                //    ImGui::Checkbox("Seleziona Maschera Rettangolare", &g_useRectMaskSelection);
-                //}
             }
             ImGui::Dummy(ImVec2(0, 3));
             ImGui::TreePop();
@@ -1425,17 +1434,18 @@ int main(int, char**)
         float stretch_factor[2] = { g_x_stretch,  g_y_stretch };
         float offset_factor[2] = { g_transform.offsetX,  g_transform.offsetY };
 
-        if (ImGui::TreeNode("Impostazioni Debug di Render")) {
-            ImGui::DragFloat("Zoom", &g_transform.zoom, 0.5f);
-            if (g_transform.zoom < 0.05f) g_transform.zoom = 0.05f;
-            ImGui::DragFloat2("Offset", offset_factor, 0.5f, -5000, 5000);
-            g_transform.offsetX = offset_factor[0];
-            g_transform.offsetY = offset_factor[1];
-            ImGui::DragFloat2("Stretch", stretch_factor, 0.1f, -500, 500);
-            g_x_stretch = stretch_factor[0];
-            g_y_stretch = stretch_factor[1];
-            ImGui::TreePop();
-        }
+        // Non deve essere visibile nella versione di rilascio
+        //if (ImGui::TreeNode("Impostazioni Debug di Render")) {
+        //    ImGui::DragFloat("Zoom", &g_transform.zoom, 0.5f);
+        //    if (g_transform.zoom < 0.05f) g_transform.zoom = 0.05f;
+        //    ImGui::DragFloat2("Offset", offset_factor, 0.5f, -5000, 5000);
+        //    g_transform.offsetX = offset_factor[0];
+        //    g_transform.offsetY = offset_factor[1];
+        //    ImGui::DragFloat2("Stretch", stretch_factor, 0.1f, -500, 500);
+        //    g_x_stretch = stretch_factor[0];
+        //    g_y_stretch = stretch_factor[1];
+        //    ImGui::TreePop();
+        //}
 
         if (g_x_stretch < 1.0f) g_x_stretch = 1.0f;
         if (g_y_stretch < 1.0f) g_y_stretch = 1.0f;
@@ -1529,7 +1539,7 @@ int main(int, char**)
         if (g_Width > 0 && g_Height > 0)
         {
             ImGui::PushFont(thin);
-            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.2.0-beta");
+            ImGui::GetBackgroundDrawList()->AddText(ImVec2(10, 10), IM_COL32_BLACK, "C Viewer  -  v1.2.0");
             ImGui::PopFont();
         }
         ImGui::PopFont();

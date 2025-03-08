@@ -62,7 +62,7 @@ _In alternativa, puoi compilare il codice sorgente manualmente._
 
 - `equations`: Immagini delle equazioni dei vari sistemi dinamici.
 - `fonts`: Font utilizzati nell'interfaccia grafica.
-- `Icons`: Icone dell'applicazione.
+- `Icons`: Icona dell'applicazione.
 - `src`: Codice sorgente dell'applicazione:
   - `main.cpp`: File principale contenente il ciclo di rendering, la gestione degli eventi e l'interfaccia utente (ImGui).
   - `kernel.cu`: Funzioni kernel CUDA per l'integrazione dei sistemi dinamici e il calcolo dell'operatore di stabilità.
