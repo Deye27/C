@@ -174,8 +174,37 @@ static double g_rectMaskPopupStartTime = 0.0;
 static const double g_rectMaskPopupDuration = 3.0; // Durata del popup in secondi
 static ImVec4 g_rectMaskPopupColor = ImVec4(0.0f, 0.1f, 0.0f, 0.5f); // Colore iniziale (verde semitrasparente)
 
-
 extern void run_cuda_kernel(int model, int width, int height, float* d_distances, float dt, float t_max, float offsetX, float offsetY, float zoom, float x_stretch, float y_stretch, float Iext, int bifurcation_type_id, float L, float gamma, float g, float r1, float K1, float a12, float r2, float K2, float a21, float a, float b, float c, float d, float scale, int numSides, int blockDimX, int blockDimY, bool useBoundingBox, float boundingBoxMinX, float boundingBoxMaxX, float boundingBoxMinY, float boundingBoxMaxY, bool useMask, int maskType, float maskCenterX, float maskCenterY, float maskRadius, float rectMaskStartX, float rectMaskStartY, float rectMaskEndX, float rectMaskEndY);
+
+static void draw_close_button(bool* p_open)
+{
+    ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImVec2 window_pos, window_pos_pivot;
+    window_pos.x = viewport->Pos.x + viewport->Size.x; // Right edge of viewport - some padding
+    window_pos.y = viewport->Pos.y;                     // Top edge of viewport + some padding
+    window_pos_pivot.x = 1.0f; // Pivot on the right edge
+    window_pos_pivot.y = 0.0f; // Pivot on the top edge
+    ImGui::SetNextWindowPos(window_pos, ImGuiCond_Always, window_pos_pivot);
+    ImGui::SetNextWindowViewport(viewport->ID);
+    window_flags |= ImGuiWindowFlags_NoMove;
+    ImGui::SetNextWindowBgAlpha(0.0f); // Make the window background transparent
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.0f, 0.0f, 1.0f));      // Transparent button background
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.65f, 0.0f, 0.0f, 1.0f)); // Slightly darker on hover
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.6f, 0.0f, 0.0f, 1.0f));  // Even darker on active
+
+    if (ImGui::Begin("CloseButton", p_open, window_flags))
+    {
+        ImGui::PushFont(regular);
+        if (ImGui::Button("X")) {
+            PostQuitMessage(0); // Send WM_QUIT message to close the application
+        }
+        ImGui::SetItemTooltip("Chiudi", ImGui::GetStyle().HoverStationaryDelay);
+        ImGui::PopFont();
+    }
+    ImGui::PopStyleColor(3); // Pop the button color styles
+    ImGui::End();
+}
 
 // Funzione CPU per la maschera (non più usata, la logica è in CUDA)
 bool mask_function(float x, float y) {
@@ -1516,9 +1545,8 @@ int main(int, char**)
 
         ImGui::Dummy(ImVec2(0, 3));
         ImGui::Text("Media applicazione %.0f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-
+        draw_close_button(nullptr);
         title(&view_title, modelNames[model]);
-
         styleManager.Restore();
         ImGui::End();
 
